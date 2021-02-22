@@ -8,8 +8,8 @@ COPY requirements.txt ca.cer* /
 
 RUN apt-get update -y && \
     apt-get install -y git && \
-    git config --global http.sslCAInfo /ca.cer && \
-    pip config set global.cert /ca.cer && \
+    (test ! -f /ca.cer || git config --global http.sslCAInfo /ca.cer) && \
+    (test ! -f /ca.cer || pip config set global.cert /ca.cer) && \
     pip install --prefix=/install -r /requirements.txt
 
 FROM python:3-slim

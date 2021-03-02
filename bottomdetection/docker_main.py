@@ -17,7 +17,7 @@ if __name__ == "__main__":
         exit(0)
 
     input_name = os.getenv('INPUT_NAME', '.')
-    output_name = os.getenv('OUTPUT_NAME', 'out.nc')
+    output_name = os.getenv('OUTPUT_NAME', 'out.parquet')
     algorithm = os.getenv('ALGORITHM', 'simple')
 
     in_dir = os.path.expanduser("/in_dir")

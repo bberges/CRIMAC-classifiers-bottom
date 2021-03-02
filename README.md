@@ -17,8 +17,9 @@ Options as environment variables:
 1. `INPUT_NAME` - Name of the zarr file in `in_dir`.
 2. `OUTPUT_NAME` - Name of the annotation file in `out_dir`.
    The output format is given by the file name suffix:
-    * `.nc` - netCDF4.
-    * `.work` - LSSS work file.
+    * `.csv`
+    * `.html`
+    * `.parquet`
 3. `ALGORITHM` - The bottom detection algorithm to use:
     * `constant` - A very fast algorithm for testing and debugging.
     * `simple` - A very simple threshold based algorithm.
@@ -29,7 +30,7 @@ docker run -it --name bottomdetection \
   -v /home/user/data:/in_dir \
   -v /home/user/output:/out_dir  \
   --env INPUT_NAME=dataset.zarr \
-  --env OUTPUT_NAME=bottom.nc \
+  --env OUTPUT_NAME=bottom.parquet \
   --env ALGORITHM=simple \
   crimac/bottomdetection
 ```

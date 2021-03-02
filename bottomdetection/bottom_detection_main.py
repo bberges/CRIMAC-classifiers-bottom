@@ -6,11 +6,13 @@ Copyright (c) 2021, Contributors to the CRIMAC project.
 Licensed under the MIT license.
 """
 
-import annotationtools
+import pyarrow as pa
+import pyarrow.parquet as pq
 import xarray as xr
 
 from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector
+from bottomdetection.annotation import Annotation
 
 
 def run(zarr_file, out_file, bottom_algorithm):
@@ -39,12 +41,19 @@ def detect_bottom(zarr_data, bottom_algorithm):
         raise ValueError('Unknown bottom algorithm: ' + bottom_algorithm)
 
 
-def write_to_file(annotation, file):
-    if file.endswith('.work'):
-        annotationtools.writers.annotation_to_work(filename=file, annotation=annotation)
+def write_to_file(annotation: Annotation, file):
+    df = annotation.to_data_frame()
 
-    elif file.endswith('.nc'):
-        annotationtools.writers.annotation_to_nc(filename=file, annotation=annotation)
+    if file.endswith('.csv'):
+        df.to_csv(file)
+
+    elif file.endswith('.html'):
+        df.to_html(file)
+
+    elif file.endswith('.parquet'):
+        table = pa.Table.from_pandas(df)
+        with pq.ParquetWriter(file, table.schema) as writer:
+            writer.write_table(table=table)
 
     else:
         raise ValueError('Unknown out format: ' + file)

@@ -7,6 +7,7 @@ Licensed under the MIT license.
 """
 
 import os
+import sys
 
 from bottomdetection import bottom_detection_main
 
@@ -14,7 +15,7 @@ if __name__ == "__main__":
     if os.getenv('DEBUG', 'false') == 'true':
         print('Press enter...')
         input()
-        exit(0)
+        sys.exit(0)
 
     input_name = os.getenv('INPUT_NAME', '.')
     output_name = os.getenv('OUTPUT_NAME', 'out.parquet')

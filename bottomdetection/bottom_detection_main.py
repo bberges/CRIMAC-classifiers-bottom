@@ -32,13 +32,12 @@ def detect_bottom(zarr_data, bottom_algorithm):
     if bottom_algorithm == 'simple':
         return simple_bottom_detector.detect_bottom(zarr_data)
 
-    elif bottom_algorithm.startswith('constant'):
+    if bottom_algorithm.startswith('constant'):
         # A very fast algorithm for testing and debugging.
         depth = float(bottom_algorithm[8:]) if len(bottom_algorithm) > 8 else 100
         return [depth] * len(zarr_data.ping_time)
 
-    else:
-        raise ValueError('Unknown bottom algorithm: ' + bottom_algorithm)
+    raise ValueError('Unknown bottom algorithm: ' + bottom_algorithm)
 
 
 def write_to_file(annotation: Annotation, file):

@@ -21,8 +21,7 @@ def to_bottom_annotation(zarr_data, bottom_depths):
 
     annotation = Annotation()
 
-    for i in range(len(bottom_depths)):
-        bottom_depth = bottom_depths[i]
+    for i, bottom_depth in enumerate(bottom_depths):
         if np.isnan(bottom_depth):
             continue
         time = np.datetime64(ping_time[i].data)

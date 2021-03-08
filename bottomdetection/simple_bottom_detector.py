@@ -16,7 +16,7 @@ def detect_bottom(zarr_data):
     depth_ranges, indices = detect_bottom_single_channel(log_sv[0], -31)
     depth_ranges_back_step, indices_back_step = back_step(sv[0], indices, 0.001)
     offset = 0.5
-    bottom_depths = depth_ranges_back_step - zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
+    bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
     return bottom_depths.data
 
 

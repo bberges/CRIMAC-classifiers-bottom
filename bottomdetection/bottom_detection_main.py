@@ -16,7 +16,7 @@ from bottomdetection.annotation import Annotation
 
 
 def run(zarr_file, out_file, bottom_algorithm):
-    zarr_data = xr.open_zarr(zarr_file)
+    zarr_data = xr.open_zarr(zarr_file, chunks={'frequency': 'auto', 'ping_time': 'auto', 'range': -1})
     print(zarr_data)
 
     bottom_depths = detect_bottom(zarr_data, bottom_algorithm)

@@ -40,6 +40,17 @@ def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, min
                         coords={'ping_time': channel_sv.ping_time})
 
 
+def _back_step_inner(v, di, min_depth_value_fraction: float, max_offset):
+    vi = v[di]
+
+    if di > 0:
+        back_step_offset = (np.asarray(v[di - max_offset:di + 1])[::-1] < min_depth_value_fraction * vi).argmax()
+        back_step_index = di - back_step_offset \
+            if back_step_offset > 0 else int(di - max_offset)
+    else:
+        back_step_index = -1
+    return back_step_index
+
 def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_value_fraction: float, maximum_range=10):
     """
     Find minimum bottom depths by back stepping
@@ -50,19 +61,19 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_va
     :param maximum_range: a maximal distance above bottom accepted as the minimal bottom distance
     :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
     """
-    values = sv_array[:, depths_indices]
     max_offset: int = int(maximum_range / (sv_array.range[1] - sv_array.range[0]))
-    back_step_indices = []
-    for i, v in enumerate(sv_array):
-        back_step_index = -1
-        if depths_indices[i].values > 0:
-            back_step_offset = (np.asarray(v[depths_indices[i].values - max_offset:depths_indices[
-                i].values + 1])[::-1] < min_depth_value_fraction * values[i].values).argmax()
-            back_step_index = depths_indices[i].values - back_step_offset \
-                if back_step_offset > 0 else int(depths_indices[i].values - max_offset)
-        back_step_indices.append(int(back_step_index))
-    back_step_indices = np.asarray(back_step_indices)
-    bottom_depths = np.where(back_step_indices < 0, np.nan, sv_array.range[back_step_indices])
+
+    back_step_indices = xr.apply_ufunc(_back_step_inner,
+                        sv_array,
+                        depths_indices,
+                        input_core_dims=[["range"], []],
+                        kwargs={'min_depth_value_fraction': min_depth_value_fraction, 'max_offset': max_offset},
+                        vectorize=True,
+                        dask="parallelized",
+                        output_dtypes=[np.int64]
+                        )
+
+    bottom_depths = sv_array.range[back_step_indices].where(back_step_indices >= 0, np.nan)
     return xr.DataArray(name="bottom_depth_backstep", data=bottom_depths, dims=['ping_time'],
                         coords={'ping_time': sv_array.ping_time}), \
            xr.DataArray(name="bottom_index_backstep", data=back_step_indices, dims=['ping_time'],

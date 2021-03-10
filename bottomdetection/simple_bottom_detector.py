@@ -12,9 +12,15 @@ import xarray as xr
 
 def detect_bottom(zarr_data):
     sv = zarr_data.sv
-    log_sv = 10 * np.log10(sv)
-    depth_ranges, indices = detect_bottom_single_channel(log_sv[0], -31)
-    depth_ranges_back_step, indices_back_step = back_step(sv[0], indices, 0.001)
+    sv0 = sv[0]
+    #log_sv = 10 * np.log10(sv)
+    threshold_log_sv = -31
+    threshold_sv = 10 ** (threshold_log_sv / 10)
+
+    depth_ranges, indices = detect_bottom_single_channel(sv0, threshold_sv)
+
+    depth_ranges_back_step, indices_back_step = back_step(sv0, indices, 0.001)
+
     offset = 0.5
     bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
     return bottom_depths

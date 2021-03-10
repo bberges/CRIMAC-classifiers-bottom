@@ -21,7 +21,7 @@ def run(zarr_file, out_file, bottom_algorithm):
 
     bottom_depths = detect_bottom(zarr_data, bottom_algorithm)
 
-    annotation = bottom_annotation.to_bottom_annotation(zarr_data, bottom_depths)
+    annotation = bottom_annotation.to_bottom_annotation(bottom_depths)
     print('')
     print('Annotation:\n' + str(annotation))
 
@@ -40,8 +40,7 @@ def detect_bottom(zarr_data, bottom_algorithm):
     raise ValueError('Unknown bottom algorithm: ' + bottom_algorithm)
 
 
-def write_to_file(annotation: Annotation, file):
-    df = annotation.to_data_frame()
+def write_to_file(df, file):
 
     if file.endswith('.csv'):
         df.to_csv(file)

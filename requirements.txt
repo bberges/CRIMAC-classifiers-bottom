@@ -1,3 +1,4 @@
+dask[array]
 numpy
 pandas
 pyarrow

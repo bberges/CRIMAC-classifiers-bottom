@@ -10,7 +10,7 @@ import numpy as np
 import xarray as xr
 
 
-def detect_bottom(zarr_data):
+def detect_bottom(zarr_data: xr.Dataset) -> xr.DataArray:
     sv = zarr_data.sv
     sv0 = sv[0]
     #log_sv = 10 * np.log10(sv)
@@ -23,7 +23,8 @@ def detect_bottom(zarr_data):
 
     offset = 0.5
     bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
-    return bottom_depths
+    return xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
+                        coords={'ping_time': zarr_data['ping_time']})
 
 
 def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, minimum_range=10):

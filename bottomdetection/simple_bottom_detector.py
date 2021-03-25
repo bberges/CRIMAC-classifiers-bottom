@@ -23,8 +23,10 @@ def detect_bottom(zarr_data: xr.Dataset) -> xr.DataArray:
 
     offset = 0.5
     bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
-    return xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
-                        coords={'ping_time': zarr_data['ping_time']})
+    bottom_depths = xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
+                                 coords={'ping_time': zarr_data['ping_time']})
+    bottom_depths = bottom_depths.dropna('ping_time')
+    return bottom_depths
 
 
 def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, minimum_range=10):

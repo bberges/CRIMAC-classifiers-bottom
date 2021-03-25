@@ -36,7 +36,7 @@ def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, min
     :return: a data array of bottom depths and the indices of the bottom depths
     """
     m = channel_sv.where((~np.isnan(channel_sv)) & (channel_sv >= threshold), other=-1)
-    offset: int = int(minimum_range / (channel_sv.range[1] - channel_sv.range[0]))
+    offset: int = max(int((minimum_range - channel_sv.range[0]) / (channel_sv.range[1] - channel_sv.range[0])), 0)
     bottom_indices = m[:, offset:].argmax(axis=1) + offset
     bottom_depths = channel_sv.range[bottom_indices].where(bottom_indices != offset, np.nan)
     bottom_indices = bottom_indices.where(bottom_indices != offset, -1)
@@ -57,17 +57,17 @@ def _back_step_inner(v, di, min_depth_value_fraction: float, max_offset):
         back_step_index = -1
     return back_step_index
 
-def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_value_fraction: float, maximum_range=10):
+def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_value_fraction: float, maximum_distance=10):
     """
     Find minimum bottom depths by back stepping
 
     :param sv_array: an array of sv values for a channel
     :param depths_indices: sample indices of detected depth
     :param min_depth_value_fraction: a fraction of the detected bottom echo strength
-    :param maximum_range: a maximal distance above bottom accepted as the minimal bottom distance
+    :param maximum_distance: a maximal distance above bottom accepted as the minimal bottom distance
     :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
     """
-    max_offset: int = int(maximum_range / (sv_array.range[1] - sv_array.range[0]))
+    max_offset: int = int(maximum_distance / (sv_array.range[1] - sv_array.range[0]))
 
     back_step_indices = xr.apply_ufunc(_back_step_inner,
                         sv_array,

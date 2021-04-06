@@ -38,7 +38,7 @@ def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, min
     :param minimum_range: the minimum range from the transducer
     :return: a data array of bottom depths and the indices of the bottom depths
     """
-    m = channel_sv.where((~np.isnan(channel_sv)) & (channel_sv >= threshold), other=-1)
+    m = channel_sv.where((~np.isnan(channel_sv)) & (channel_sv >= threshold), other=-np.inf)
     offset: int = max(int((minimum_range - channel_sv.range[0]) / (channel_sv.range[1] - channel_sv.range[0])), 0)
     bottom_indices = m[:, offset:].argmax(axis=1) + offset
     bottom_depths = channel_sv.range[bottom_indices].where(bottom_indices != offset, np.nan)

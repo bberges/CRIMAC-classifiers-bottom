@@ -5,6 +5,7 @@ A simple threshold-based bottom detection.
 Copyright (c) 2021, Contributors to the CRIMAC project.
 Licensed under the MIT license.
 """
+import warnings
 
 import numpy as np
 import xarray as xr
@@ -18,7 +19,7 @@ def detect_bottom(zarr_data: xr.Dataset) -> xr.DataArray:
 
     depth_ranges, indices = detect_bottom_single_channel(sv0, threshold_sv)
 
-    depth_ranges_back_step, indices_back_step = back_step(sv0, indices, 0.001)
+    depth_ranges_back_step, indices_back_step = back_step(sv0, indices, zarr_data['heave'] + zarr_data['transducer_draft'][0], 0.001)
 
     offset = 0.5
     bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
@@ -48,34 +49,65 @@ def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, min
                         coords={'ping_time': channel_sv.ping_time})
 
 
-def _back_step_inner(v, di, min_depth_value_fraction: float, max_offset):
-    vi = v[di]
-
-    if di > 0:
-        back_step_offset = (np.asarray(v[di - max_offset:di + 1])[::-1] < min_depth_value_fraction * vi).argmax()
-        back_step_index = di - back_step_offset \
-            if back_step_offset > 0 else int(di - max_offset)
+def _shift(arr, num, fill_value=np.nan):
+    # faster than ndimage.shift
+    result = np.empty_like(arr)
+    if num > 0:
+        result[:num] = fill_value
+        result[num:] = arr[:-num]
+    elif num < 0:
+        result[num:] = fill_value
+        result[:num] = arr[-num:]
     else:
-        back_step_index = -1
-    return back_step_index
+        result[:] = arr
+    return result
 
 
-def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_value_fraction: float, maximum_distance=10):
+def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, min_depth_value_fraction: float, max_offset):
+    if di < 0:
+        return -1
+    # stack previous and next array and take max
+    shift_prev = int(shift_prev) if not np.isnan(shift_prev) else shift
+    shift_next = int(shift_next) if not np.isnan(shift_next) else shift
+    # ignore warnings when all arrays have nan in the same position
+    with warnings.catch_warnings():
+        warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
+        vs = np.nanmax(np.stack([v, _shift(v_prev, shift_prev - shift), _shift(v_next, shift_next - shift)]), axis=0)
+    # stack shifted arrays in range direction and take max
+    a = np.nanmax(np.stack([np.asarray(vs[di - max_offset:di + 1])[::-1],
+                            np.asarray(_shift(vs, 1)[di - max_offset:di + 1])[::-1],
+                            np.asarray(_shift(vs, -1)[di - max_offset:di + 1])[::-1]]), axis=0)
+    back_step_offset = (a < min_depth_value_fraction * vi).argmax()
+    return di - back_step_offset \
+        if back_step_offset > 0 else di - max_offset
+
+
+def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correction, min_depth_value_fraction: float,
+              maximum_distance=10):
     """
     Find minimum bottom depths by back stepping
 
     :param sv_array: an array of sv values for a channel
     :param depths_indices: sample indices of detected depth
+    :param depth_correction: the recorded depth correction (heave plus transducer draft)
     :param min_depth_value_fraction: a fraction of the detected bottom echo strength
     :param maximum_distance: a maximal distance above bottom accepted as the minimal bottom distance
     :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
     """
     max_offset: int = int(maximum_distance / (sv_array.range[1] - sv_array.range[0]))
+    range_shift = np.round(depth_correction / (sv_array.range[1] - sv_array.range[0])).astype(int)
 
     back_step_indices = xr.apply_ufunc(_back_step_inner,
                                        sv_array,
+                                       sv_array.shift(ping_time=1),
+                                       sv_array.shift(ping_time=-1),
+                                       range_shift,
+                                       range_shift.shift(ping_time=1),
+                                       range_shift.shift(ping_time=-1),
                                        depths_indices,
-                                       input_core_dims=[['range'], []],
+                                       sv_array[:, depths_indices],
+                                       input_core_dims=[['range'], ['range'], ['range'],
+                                                        [], [], [], [], []],
                                        kwargs={'min_depth_value_fraction': min_depth_value_fraction,
                                                'max_offset': max_offset},
                                        vectorize=True,

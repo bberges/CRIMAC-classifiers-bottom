@@ -77,9 +77,13 @@ def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, m
     a = np.nanmax(np.stack([np.asarray(vs[di - max_offset:di + 1])[::-1],
                             np.asarray(_shift(vs, 1)[di - max_offset:di + 1])[::-1],
                             np.asarray(_shift(vs, -1)[di - max_offset:di + 1])[::-1]]), axis=0)
-    back_step_offset = (a < min_depth_value_fraction * vi).argmax()
-    return di - back_step_offset \
-        if back_step_offset > 0 else di - max_offset
+    back_step_offset = (a <= min_depth_value_fraction * vi).argmax()
+    back_step_offset = back_step_offset if back_step_offset > 0 else max_offset
+    #forward step on an unsmoothed array
+    forward_step_offset = 0
+    if v[di - back_step_offset] < min_depth_value_fraction * vi:
+        forward_step_offset = (np.asarray(v[di - back_step_offset + 1:di]) > min_depth_value_fraction * vi).argmax()
+    return di - back_step_offset + forward_step_offset
 
 
 def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correction, min_depth_value_fraction: float,

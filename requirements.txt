@@ -1,4 +1,6 @@
+dask
 dask[array]
+dask[distributed]
 numpy
 pandas
 pyarrow

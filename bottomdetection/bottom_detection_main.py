@@ -24,7 +24,7 @@ def run(zarr_file: str, out_file: str, bottom_algorithm: str):
     print('\n\nBottom depth:')
     print(bottom_depth)
 
-    annotation = bottom_annotation.to_bottom_annotation(zarr_data['channelID'][0].values, bottom_depth)
+    annotation = bottom_annotation.to_bottom_annotation(zarr_data['channel_id'][0].values, bottom_depth)
     print('\n\nAnnotation:')
     print(annotation)
 

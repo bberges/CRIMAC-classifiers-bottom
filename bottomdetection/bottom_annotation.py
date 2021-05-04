@@ -18,13 +18,12 @@ def to_bottom_annotation(channel_id: str, bottom_depths: xr.DataArray) -> pd.Dat
     df = bottom_depths.to_dataframe('mask_depth_upper')
 
     df.reset_index(level=0, inplace=True)
-    df = df.rename(columns={'ping_time': 'pingTime'})
 
     df = df.assign(mask_depth_lower=9999,
                    priority=2,
-                   acousticCat=999,
+                   acoustic_category=999,
                    proportion=1,
-                   ID='bottom',
-                   ChannelID=channel_id)
+                   object_id='bottom',
+                   channel_id=channel_id)
 
     return df

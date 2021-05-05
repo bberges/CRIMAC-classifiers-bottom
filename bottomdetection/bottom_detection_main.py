@@ -6,11 +6,11 @@ Copyright (c) 2021, Contributors to the CRIMAC project.
 Licensed under the MIT license.
 """
 
+import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import numpy as np
 import xarray as xr
-import pandas as pd
 
 from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector

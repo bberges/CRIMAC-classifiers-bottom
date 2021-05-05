@@ -10,19 +10,20 @@ import warnings
 import numpy as np
 import xarray as xr
 
+from bottomdetection.parameters import Parameters
 
-def detect_bottom(zarr_data: xr.Dataset) -> xr.DataArray:
+
+def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) -> xr.DataArray:
     sv = zarr_data['sv']
     sv0 = sv[0]
-    threshold_log_sv = -31
-    threshold_sv = 10 ** (threshold_log_sv / 10)
+    threshold_sv = 10 ** (parameters.threshold_log_sv / 10)
 
-    depth_ranges, indices = detect_bottom_single_channel(sv0, threshold_sv)
+    depth_ranges, indices = detect_bottom_single_channel(sv0, threshold_sv, parameters.minimum_range)
 
-    depth_ranges_back_step, indices_back_step = back_step(sv0, indices, zarr_data['heave'] + zarr_data['transducer_draft'][0], 0.001)
+    depth_ranges_back_step, indices_back_step = back_step(sv0, indices, zarr_data['heave'] + zarr_data['transducer_draft'][0],
+                                                          0.001, parameters.maximum_backstep_distance)
 
-    offset = 0.5
-    bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - offset
+    bottom_depths = depth_ranges_back_step + zarr_data['heave'] + zarr_data['transducer_draft'][0] - parameters.offset
     bottom_depths = xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
                                  coords={'ping_time': zarr_data['ping_time']})
     bottom_depths = bottom_depths.dropna('ping_time')

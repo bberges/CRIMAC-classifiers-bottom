@@ -14,13 +14,14 @@ import xarray as xr
 
 from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector
+from bottomdetection.parameters import Parameters
 
 
-def run(zarr_file: str, out_file: str, bottom_algorithm: str):
+def run(zarr_file: str, out_file: str, bottom_algorithm: str, parameters: Parameters = Parameters()):
     zarr_data = xr.open_zarr(zarr_file, chunks={'frequency': 'auto', 'ping_time': 'auto', 'range': -1})
     print(zarr_data)
 
-    bottom_depth = detect_bottom(zarr_data, bottom_algorithm)
+    bottom_depth = detect_bottom(zarr_data, bottom_algorithm, parameters)
     print('\n\nBottom depth:')
     print(bottom_depth)
 
@@ -31,9 +32,9 @@ def run(zarr_file: str, out_file: str, bottom_algorithm: str):
     write_to_file(annotation, out_file)
 
 
-def detect_bottom(zarr_data: xr.Dataset, bottom_algorithm: str):
+def detect_bottom(zarr_data: xr.Dataset, bottom_algorithm: str, parameters: Parameters):
     if bottom_algorithm == 'simple':
-        return simple_bottom_detector.detect_bottom(zarr_data)
+        return simple_bottom_detector.detect_bottom(zarr_data, parameters)
 
     if bottom_algorithm.startswith('constant'):
         # A very fast algorithm for testing and debugging.

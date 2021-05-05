@@ -14,6 +14,7 @@ import dask
 from dask.distributed import Client
 
 from bottomdetection import bottom_detection_main
+from bottomdetection.parameters import Parameters
 
 if __name__ == '__main__':
     if os.getenv('DEBUG', 'false') == 'true':
@@ -27,6 +28,16 @@ if __name__ == '__main__':
 
     in_dir = os.path.expanduser('/in_dir')
     out_dir = os.path.expanduser('/out_dir')
+
+    parameters = Parameters()
+    for attr in dir(parameters):
+        if attr.startswith('__'):
+            continue
+        string_value = os.getenv(f'PARAMETER.{attr}')
+        if not string_value:
+            continue
+        value = float(string_value)
+        setattr(parameters, attr, value)
 
     # Setting dask
     tmp_dir = os.path.expanduser(out_dir + '/tmp')

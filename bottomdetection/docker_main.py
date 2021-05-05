@@ -8,6 +8,10 @@ Licensed under the MIT license.
 
 import os
 import sys
+import dask
+import shutil
+
+from dask.distributed import Client
 
 from bottomdetection import bottom_detection_main
 
@@ -24,6 +28,18 @@ if __name__ == "__main__":
     in_dir = os.path.expanduser("/in_dir")
     out_dir = os.path.expanduser("/out_dir")
 
+    # Setting dask
+    tmp_dir = os.path.expanduser(out_dir + "/tmp")
+
+    dask.config.set({'temporary_directory': tmp_dir})
+    client = Client()
+    print(client)
+
     bottom_detection_main.run(zarr_file=in_dir + '/' + input_name,
                               out_file=out_dir + '/' + output_name,
                               bottom_algorithm=algorithm)
+
+    # Cleaning up
+    client.close()
+    if os.path.exists(tmp_dir):
+        shutil.rmtree(tmp_dir)

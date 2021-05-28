@@ -28,7 +28,6 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     bottom_depths = heave_corrected_transducer_depth + depth_ranges_back_step - parameters.offset
     bottom_depths = xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
                                  coords={'ping_time': zarr_data['ping_time']})
-    bottom_depths = bottom_depths.dropna('ping_time')
     return bottom_depths
 
 

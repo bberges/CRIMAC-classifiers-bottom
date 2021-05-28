@@ -2,10 +2,8 @@
 
 This repository contains code for bottom detection in the CRIMAC project.
 
-The bottom detection takes input from zarr files created by
-[CRIMAC-preprocessing](https://github.com/CRIMAC-WP4-Machine-learning/CRIMAC-preprocessing),
-and outputs bottom as annotation masks using
-[CRIMAC-annotationtools](https://github.com/CRIMAC-WP4-Machine-learning/CRIMAC-annotationtools).
+The bottom detection works on zarr files created by
+[CRIMAC-preprocessing](https://github.com/CRIMAC-WP4-Machine-learning/CRIMAC-preprocessing).
 
 ## Running using Docker
 
@@ -16,13 +14,21 @@ Two directories must be mounted:
 Options as environment variables:
 1. `INPUT_NAME` - Name of the zarr file in `in_dir`.
 2. `OUTPUT_NAME` - Name of the annotation file in `out_dir`.
-   The output format is given by the file name suffix:
-    * `.csv`
-    * `.html`
-    * `.parquet`
-3. `ALGORITHM` - The bottom detection algorithm to use:
+   The output format is given by the file name suffix.
+   * Pandas DataFrame:
+      * `.csv`
+      * `.html`
+      * `.parquet`
+   * Xarray Dataset:
+      * `.nc`
+      * `.zarr`
+3. `ALGORITHM` - Optional. The bottom detection algorithm to use:
     * `constant` - A very fast algorithm for testing and debugging.
     * `simple` - A very simple threshold based algorithm.
+4. Algorithm parameters. Optional.
+   * `PARAMETER_minimum_range` \[m] - The minimum range of the detected bottom.
+   * `PARAMETER_offset` \[m] - Additional offset to the bottom after backstepping.
+   * `PARAMETER_threshold_log_sv` \[dB] - The minimum Sv value for detecting bottom.
 
 Example:
 ```bash
@@ -32,5 +38,6 @@ docker run -it --name bottomdetection \
   --env INPUT_NAME=dataset.zarr \
   --env OUTPUT_NAME=bottom.parquet \
   --env ALGORITHM=simple \
+  --env PARAMETER_offset=0.5 \
   crimac/bottomdetection
 ```

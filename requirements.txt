@@ -1,6 +1,8 @@
 dask
 dask[array]
 dask[distributed]
+netCDF4
+numcodecs
 numpy
 pandas
 pyarrow

@@ -33,7 +33,7 @@ if __name__ == '__main__':
     for attr in dir(parameters):
         if attr.startswith('__'):
             continue
-        string_value = os.getenv(f'PARAMETER.{attr}')
+        string_value = os.getenv(f'PARAMETER_{attr}')
         if not string_value:
             continue
         value = float(string_value)
@@ -48,7 +48,8 @@ if __name__ == '__main__':
 
     bottom_detection_main.run(zarr_file=in_dir + '/' + input_name,
                               out_file=out_dir + '/' + output_name,
-                              bottom_algorithm=algorithm)
+                              algorithm=algorithm,
+                              parameters=parameters)
 
     # Cleaning up
     client.close()

@@ -8,7 +8,6 @@ Licensed under the MIT license.
 
 
 class Parameters:
-    maximum_backstep_distance = 10
     minimum_range = 10
     offset = 0.5
     threshold_log_sv = -31

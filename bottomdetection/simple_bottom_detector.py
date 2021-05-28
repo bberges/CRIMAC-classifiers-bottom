@@ -23,7 +23,7 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
 
     depth_ranges_back_step, indices_back_step = back_step(channel_sv, indices, heave_corrected_transducer_depth,
-                                                          0.001, parameters.maximum_backstep_distance)
+                                                          0.001)
 
     bottom_depths = heave_corrected_transducer_depth + depth_ranges_back_step - parameters.offset
     bottom_depths = xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
@@ -66,7 +66,8 @@ def _shift(arr, num, fill_value=np.nan):
     return result
 
 
-def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, min_depth_value_fraction: float, max_offset):
+def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, min_depth_value_fraction: float,
+                     segment_nsamples):
     if di < 0:
         return -1
     # stack previous and next array and take max
@@ -76,21 +77,30 @@ def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, m
     with warnings.catch_warnings():
         warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
         vs = np.nanmax(np.stack([v, _shift(v_prev, shift_prev - shift), _shift(v_next, shift_next - shift)]), axis=0)
-    # stack shifted arrays in range direction and take max
-    a = np.nanmax(np.stack([np.asarray(vs[di - max_offset:di + 1])[::-1],
-                            np.asarray(_shift(vs, 1)[di - max_offset:di + 1])[::-1],
-                            np.asarray(_shift(vs, -1)[di - max_offset:di + 1])[::-1]]), axis=0)
-    back_step_offset = (a <= min_depth_value_fraction * vi).argmax()
-    back_step_offset = back_step_offset if back_step_offset > 0 else max_offset
-    #forward step on an unsmoothed array
+    back_step_offset = 1
+    segment_end = di
+    while segment_end > 0:
+        segment_start = max(0, segment_end - segment_nsamples)
+        actual_length = segment_end - segment_start
+        # stack shifted arrays in range direction and take max
+        a = np.nanmax(np.stack([np.asarray(vs[segment_start:segment_end])[::-1],
+                                np.asarray(_shift(vs, 1)[segment_start:segment_end])[::-1],
+                                np.asarray(_shift(vs, -1)[segment_start:segment_end])[::-1]]), axis=0)
+        back_step_offset_segment = (a <= min_depth_value_fraction * vi).argmax()
+        back_step_offset_segment = back_step_offset_segment \
+            if a[back_step_offset_segment] <= min_depth_value_fraction * vi else actual_length
+        back_step_offset += back_step_offset_segment
+        segment_end -= segment_nsamples
+        if back_step_offset_segment < actual_length:
+            break
+    # forward step on an unsmoothed array
     forward_step_offset = 0
     if v[di - back_step_offset] < min_depth_value_fraction * vi:
         forward_step_offset = (np.asarray(v[di - back_step_offset + 1:di]) > min_depth_value_fraction * vi).argmax()
     return di - back_step_offset + forward_step_offset
 
 
-def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correction, min_depth_value_fraction: float,
-              maximum_distance=10):
+def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correction, min_depth_value_fraction: float):
     """
     Find minimum bottom depths by back stepping
 
@@ -98,10 +108,10 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correc
     :param depths_indices: sample indices of detected depth
     :param depth_correction: the recorded depth correction (heave plus transducer draft)
     :param min_depth_value_fraction: a fraction of the detected bottom echo strength
-    :param maximum_distance: a maximal distance above bottom accepted as the minimal bottom distance
     :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
     """
-    max_offset: int = int(maximum_distance / (sv_array.range[1] - sv_array.range[0]))
+    segment_distance = 5
+    segment_nsamples: int = int(segment_distance / (sv_array.range[1] - sv_array.range[0]))
     range_shift = np.round(depth_correction / (sv_array.range[1] - sv_array.range[0])).astype(int)
 
     back_step_indices = xr.apply_ufunc(_back_step_inner,
@@ -116,7 +126,7 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correc
                                        input_core_dims=[['range'], ['range'], ['range'],
                                                         [], [], [], [], []],
                                        kwargs={'min_depth_value_fraction': min_depth_value_fraction,
-                                               'max_offset': max_offset},
+                                               'segment_nsamples': segment_nsamples},
                                        vectorize=True,
                                        dask='parallelized',
                                        output_dtypes=[np.int64]

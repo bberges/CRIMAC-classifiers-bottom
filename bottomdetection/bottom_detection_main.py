@@ -55,8 +55,8 @@ def run(zarr_file: str, out_file: str, algorithm: str, parameters: Parameters = 
 def make_attributes(zarr_file: str, zarr_data: xr.Dataset, algorithm: str, parameters: Parameters) -> dict:
     attributes = dict(
         name='CRIMAC-classifiers-bottom',
-        version=os.getenv('VERISON', 'Development version'),
-        git_hash=os.getenv('GIT_HASH', 'Unknown git_hash'),
+        version=os.getenv('VERSION_NUMBER', 'Development version'),
+        commit_sha=os.getenv('COMMIT_SHA', 'Unknown git_hash'),
         description='Bottom detection',
         time=datetime.datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
         input_file=zarr_file,

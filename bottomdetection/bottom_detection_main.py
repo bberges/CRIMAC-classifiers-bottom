@@ -5,9 +5,11 @@ The main function for bottom detection.
 Copyright (c) 2021, Contributors to the CRIMAC project.
 Licensed under the MIT license.
 """
+
 import datetime
 import hashlib
 import os
+from dataclasses import asdict
 
 import numpy as np
 import pandas as pd
@@ -63,10 +65,8 @@ def make_attributes(zarr_file: str, zarr_data: xr.Dataset, algorithm: str, param
         input_hash='todo: ... ' + zarr_data.attrs['description'],
         algorithm=algorithm,
     )
-    for attr in dir(parameters):
-        if attr.startswith('__'):
-            continue
-        attributes[f'parameter_{attr}'] = getattr(parameters, attr)
+    for key, value in asdict(parameters).items():
+        attributes[f'parameter_{key}'] = value
 
     hasher = hashlib.sha1()
     for value in attributes.values():

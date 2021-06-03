@@ -9,6 +9,7 @@ Licensed under the MIT license.
 import os
 import shutil
 import sys
+from dataclasses import asdict
 
 import dask
 from dask.distributed import Client
@@ -30,14 +31,12 @@ if __name__ == '__main__':
     out_dir = os.path.expanduser('/out_dir')
 
     parameters = Parameters()
-    for attr in dir(parameters):
-        if attr.startswith('__'):
-            continue
-        string_value = os.getenv(f'PARAMETER_{attr}')
+    for key in asdict(parameters).keys():
+        string_value = os.getenv(f'PARAMETER_{key}')
         if not string_value:
             continue
         value = float(string_value)
-        setattr(parameters, attr, value)
+        setattr(parameters, key, value)
 
     # Setting dask
     tmp_dir = os.path.expanduser(out_dir + '/tmp')

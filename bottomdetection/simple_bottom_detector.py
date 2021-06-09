@@ -31,7 +31,7 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     return bottom_depths
 
 
-def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, minimum_range=10):
+def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, minimum_range=10.0):
     """
     Detect bottom depths on one channel in the sv-array
 

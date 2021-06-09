@@ -11,6 +11,7 @@ import xarray as xr
 import dask.array as da
 import numpy as np
 
+
 def to_pandas(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataArray) -> pd.DataFrame:
     bottom_depth = bottom_depth.dropna('ping_time')
     channel_id = zarr_data['channel_id'][channel_index].values
@@ -36,6 +37,7 @@ def _bottom_2d(x):
     x[bottom_mark:] = 1
     return x
 
+
 def to_xarray(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataArray, attributes: dict) -> xr.Dataset:
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
     bottom_range = bottom_depth - heave_corrected_transducer_depth
@@ -45,10 +47,11 @@ def to_xarray(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataAr
 
     # Append indices to the last range
     bottom_range_1 = zarr_data.sv.isel(frequency=0).data
-    bottom_range_1[:,-1] = bottom_range_idx
+    bottom_range_1[:, -1] = bottom_range_idx
 
     # Convert annotation to 2d array
-    bottom_range_2 = da.apply_along_axis(_bottom_2d, 1, bottom_range_1, dtype='float32', shape=(bottom_range_1.shape[1],))
+    bottom_range_2 = da.apply_along_axis(_bottom_2d, 1, bottom_range_1, dtype='float32',
+                                         shape=(bottom_range_1.shape[1],))
 
     # Create dataset
     ds = xr.Dataset(
@@ -63,8 +66,8 @@ def to_xarray(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataAr
     )
 
     # Remove unused dims
-    remove_list = list(filter(lambda s : s not in ['frequency', 'ping_time', 'range'], list(ds.coords)))
-    ds = ds.drop(remove_list)
+    remove_list = list(filter(lambda s: s not in ['frequency', 'ping_time', 'range'], list(ds.coords)))
+    ds = ds.drop_vars(remove_list)
 
     for key in attributes.keys():
         ds.attrs[key] = attributes[key]

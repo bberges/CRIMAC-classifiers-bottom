@@ -8,7 +8,8 @@ Licensed under the MIT license.
 
 import pandas as pd
 import xarray as xr
-
+import dask.array as da
+import numpy as np
 
 def to_pandas(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataArray) -> pd.DataFrame:
     bottom_depth = bottom_depth.dropna('ping_time')
@@ -28,18 +29,42 @@ def to_pandas(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataAr
     return df
 
 
+def _bottom_2d(x):
+    """Create 2d bottom annotation"""
+    bottom_mark = int(x[-1])
+    x[:] = np.nan
+    x[bottom_mark:] = 1
+    return x
+
 def to_xarray(zarr_data: xr.Dataset, channel_index: int, bottom_depth: xr.DataArray, attributes: dict) -> xr.Dataset:
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
     bottom_range = bottom_depth - heave_corrected_transducer_depth
 
+    # Get indices of the bottom_range
+    bottom_range_idx = da.searchsorted(da.from_array(zarr_data.range), bottom_range.data)
+
+    # Append indices to the last range
+    bottom_range_1 = zarr_data.sv.isel(frequency=0).data
+    bottom_range_1[:,-1] = bottom_range_idx
+
+    # Convert annotation to 2d array
+    bottom_range_2 = da.apply_along_axis(_bottom_2d, 1, bottom_range_1, dtype='float32', shape=(bottom_range_1.shape[1],))
+
+    # Create dataset
     ds = xr.Dataset(
         data_vars=dict(
-            bottom_range=(['ping_time'], bottom_range),
+            bottom_range=(['ping_time', 'range'], bottom_range_2),
         ),
         coords=dict(
+            frequency=zarr_data['frequency'][0],
+            range=zarr_data['range'],
             ping_time=zarr_data['ping_time'],
         ),
     )
+
+    # Remove unused dims
+    remove_list = list(filter(lambda s : s not in ['frequency', 'ping_time', 'range'], list(ds.coords)))
+    ds = ds.drop(remove_list)
 
     for key in attributes.keys():
         ds.attrs[key] = attributes[key]

@@ -20,6 +20,7 @@ from numcodecs import Blosc
 
 from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector
+from bottomdetection import heaviside_bottom_detector
 from bottomdetection.parameters import Parameters
 
 
@@ -79,6 +80,9 @@ def make_attributes(zarr_file: str, zarr_data: xr.Dataset, algorithm: str, param
 def detect_bottom(zarr_data: xr.Dataset, algorithm: str, parameters: Parameters) -> xr.DataArray:
     if algorithm == 'simple':
         return simple_bottom_detector.detect_bottom(zarr_data, parameters)
+
+    if algorithm == 'heaviside':
+        return heaviside_bottom_detector.detect_bottom(zarr_data, parameters)
 
     if algorithm.startswith('constant'):
         # A very fast algorithm for testing and debugging.

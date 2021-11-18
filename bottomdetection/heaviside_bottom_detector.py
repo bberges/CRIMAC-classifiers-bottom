@@ -3,8 +3,7 @@ import numpy as np
 import xarray as xr
 
 from bottomdetection.parameters import Parameters
-from bottomdetection.simple_bottom_detector import detect_bottom_single_channel
-from bottomdetection.simple_bottom_detector import _shift
+from bottomdetection import bottom_utils
 
 
 def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) -> xr.DataArray:
@@ -12,9 +11,11 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     channel_sv = zarr_data['sv'][channel_index]
     threshold_sv = 10 ** (parameters.threshold_log_sv / 10)
 
-    depth_ranges, indices = detect_bottom_single_channel(channel_sv, threshold_sv, parameters.minimum_range)
-
+    pulse_duration = float(zarr_data['pulse_length'][channel_index])
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
+
+    depth_ranges, indices = bottom_utils.detect_bottom_single_channel(channel_sv, threshold_sv, heave_corrected_transducer_depth,
+                                                                      pulse_duration, parameters.minimum_range)
 
     depth_ranges_back_step, indices_back_step = back_step_hs(channel_sv, indices,
                                                              0.001, 3e-3, minimum_range=parameters.minimum_range)
@@ -40,8 +41,8 @@ def _back_step_inner_hs(v, di, vi, heaviside, min_depth_value_fraction, abs_thre
     start_offset = array_start - segment_start + hs_half_length
     # stack shifted arrays in range direction and take max
     a = np.nanmax(np.stack([np.asarray(v[array_start:array_end]),
-                            np.asarray(_shift(v, 1)[array_start:array_end]),
-                            np.asarray(_shift(v, -1)[array_start:array_end])]), axis=0)
+                            np.asarray(bottom_utils.shift_arr(v, 1)[array_start:array_end]),
+                            np.asarray(bottom_utils.shift_arr(v, -1)[array_start:array_end])]), axis=0)
 
     # convolve a with heaviside function, and find max
     a_hs = np.convolve(a, np.flip(heaviside), 'valid')
@@ -70,7 +71,7 @@ def _back_step_inner_hs(v, di, vi, heaviside, min_depth_value_fraction, abs_thre
 
 
 def back_step_hs(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth_value_fraction: float,
-                 abs_backstep_threshold: float, alpha=0.95, minimum_range=10):
+                 abs_backstep_threshold, alpha=0.95, minimum_range=10.0):
     """
     Find minimum bottom depths by back stepping
 

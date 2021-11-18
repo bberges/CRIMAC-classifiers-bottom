@@ -5,11 +5,11 @@ A simple threshold-based bottom detection.
 Copyright (c) 2021, Contributors to the CRIMAC project.
 Licensed under the MIT license.
 """
-import warnings
 
 import numpy as np
 import xarray as xr
 
+from bottomdetection import bottom_utils
 from bottomdetection.parameters import Parameters
 
 
@@ -18,9 +18,10 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     channel_sv = zarr_data['sv'][channel_index]
     threshold_sv = 10 ** (parameters.threshold_log_sv / 10)
 
-    depth_ranges, indices = detect_bottom_single_channel(channel_sv, threshold_sv, parameters.minimum_range)
-
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
+
+    pulse_duration = float(zarr_data['pulse_length'][channel_index])
+    depth_ranges, indices = bottom_utils.detect_bottom_single_channel(channel_sv, threshold_sv, heave_corrected_transducer_depth, pulse_duration, parameters.minimum_range)
 
     depth_ranges_back_step, indices_back_step = back_step(channel_sv, indices, heave_corrected_transducer_depth,
                                                           0.001)
@@ -31,51 +32,11 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     return bottom_depths
 
 
-def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, minimum_range=10.0):
-    """
-    Detect bottom depths on one channel in the sv-array
-
-    :param channel_sv: an array of log-sv values
-    :param threshold: a minimum threshold for bottom depth strength
-    :param minimum_range: the minimum range from the transducer
-    :return: a data array of bottom depths and the indices of the bottom depths
-    """
-    m = channel_sv.where((~np.isnan(channel_sv)) & (channel_sv >= threshold), other=-np.inf)
-    offset: int = max(int((minimum_range - channel_sv.range[0]) / (channel_sv.range[1] - channel_sv.range[0])), 0)
-    bottom_indices = m[:, offset:].argmax(axis=1) + offset
-    bottom_depths = channel_sv.range[bottom_indices].where(bottom_indices != offset, np.nan)
-    bottom_indices = bottom_indices.where(bottom_indices != offset, -1)
-    return xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
-                        coords={'ping_time': channel_sv.ping_time}), \
-           xr.DataArray(name='bottom_index', data=bottom_indices, dims=['ping_time'],
-                        coords={'ping_time': channel_sv.ping_time})
-
-
-def _shift(arr, num, fill_value=np.nan):
-    # faster than ndimage.shift
-    result = np.empty_like(arr)
-    if num > 0:
-        result[:num] = fill_value
-        result[num:] = arr[:-num]
-    elif num < 0:
-        result[num:] = fill_value
-        result[:num] = arr[-num:]
-    else:
-        result[:] = arr
-    return result
-
-
 def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, min_depth_value_fraction: float,
                      segment_nsamples):
     if di < 0:
         return -1
-    # stack previous and next array and take max
-    shift_prev = int(shift_prev) if not np.isnan(shift_prev) else shift
-    shift_next = int(shift_next) if not np.isnan(shift_next) else shift
-    # ignore warnings when all arrays have nan in the same position
-    with warnings.catch_warnings():
-        warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-        vs = np.nanmax(np.stack([v, _shift(v_prev, shift_prev - shift), _shift(v_next, shift_next - shift)]), axis=0)
+    vs = bottom_utils.stack_max(v, v_prev, v_next, shift, shift_prev, shift_next)
     back_step_offset = 1
     segment_end = di
     while segment_end > 0:
@@ -83,8 +44,8 @@ def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, m
         actual_length = segment_end - segment_start
         # stack shifted arrays in range direction and take max
         a = np.nanmax(np.stack([np.asarray(vs[segment_start:segment_end])[::-1],
-                                np.asarray(_shift(vs, 1)[segment_start:segment_end])[::-1],
-                                np.asarray(_shift(vs, -1)[segment_start:segment_end])[::-1]]), axis=0)
+                                np.asarray(bottom_utils.shift_arr(vs, 1)[segment_start:segment_end])[::-1],
+                                np.asarray(bottom_utils.shift_arr(vs, -1)[segment_start:segment_end])[::-1]]), axis=0)
         back_step_offset_segment = (a <= min_depth_value_fraction * vi).argmax()
         back_step_offset_segment = back_step_offset_segment \
             if a[back_step_offset_segment] <= min_depth_value_fraction * vi else actual_length

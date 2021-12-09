@@ -29,6 +29,7 @@ if __name__ == '__main__':
 
     in_dir = os.path.expanduser('/in_dir')
     out_dir = os.path.expanduser('/out_dir')
+    work_dir = os.path.expanduser('/work_dir')
 
     parameters = Parameters()
     for key in asdict(parameters).keys():
@@ -47,6 +48,7 @@ if __name__ == '__main__':
 
     bottom_detection_main.run(zarr_file=in_dir + '/' + input_name,
                               out_file=out_dir + '/' + output_name,
+                              work_dir=work_dir,
                               algorithm=algorithm,
                               parameters=parameters)
 

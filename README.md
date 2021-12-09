@@ -7,9 +7,11 @@ The bottom detection works on zarr files created by
 
 ## Running using Docker
 
-Two directories must be mounted:
+Mounted directories:
 1. `/in_dir` - Input directory containing zarr data.
 2. `/out_dir` - Output directory where the annotation file will be written.
+3. `/work_dir` - Directory with LSSS work files.
+   Needed only when `ALGORITHM` is set to `work_files`.
 
 Options as environment variables:
 1. `INPUT_NAME` - Name of the zarr file in `in_dir`.
@@ -25,6 +27,8 @@ Options as environment variables:
 3. `ALGORITHM` - Optional. The bottom detection algorithm to use:
     * `constant` - A very fast algorithm for testing and debugging.
     * `simple` - A very simple threshold based algorithm.
+    * `work_files` - Uses the lowest layer boundary in LSSS work files as the detected bottom. 
+      The `/work_dir` directory must be mounted.
 4. Algorithm parameters. Optional.
    * `PARAMETER_minimum_range` \[m] - The minimum range of the detected bottom.
    * `PARAMETER_offset` \[m] - Additional offset to the bottom after backstepping.

@@ -21,10 +21,16 @@ from numcodecs import Blosc
 from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector
 from bottomdetection import heaviside_bottom_detector
+from bottomdetection import work_files_bottom_detector
 from bottomdetection.parameters import Parameters
 
 
-def run(zarr_file: str, out_file: str, algorithm: str, parameters: Parameters = Parameters()) -> None:
+def run(zarr_file: str,
+        out_file: str,
+        work_dir: str = '',
+        algorithm: str = 'simple',
+        parameters: Parameters = Parameters()) -> None:
+
     zarr_data = xr.open_zarr(zarr_file, chunks={'frequency': 'auto', 'ping_time': 'auto', 'range': -1})
 
     print(f'\n\nInput: {zarr_file}')
@@ -34,7 +40,7 @@ def run(zarr_file: str, out_file: str, algorithm: str, parameters: Parameters = 
 
     attributes = make_attributes(zarr_file, zarr_data, algorithm, parameters)
 
-    bottom_depth = detect_bottom(zarr_data, algorithm, parameters)
+    bottom_depth = detect_bottom(zarr_data, work_dir, algorithm, parameters)
     print('\n\nBottom depth:')
     print(bottom_depth)
 
@@ -77,12 +83,15 @@ def make_attributes(zarr_file: str, zarr_data: xr.Dataset, algorithm: str, param
     return attributes
 
 
-def detect_bottom(zarr_data: xr.Dataset, algorithm: str, parameters: Parameters) -> xr.DataArray:
+def detect_bottom(zarr_data: xr.Dataset, work_dir: str, algorithm: str, parameters: Parameters) -> xr.DataArray:
     if algorithm == 'simple':
         return simple_bottom_detector.detect_bottom(zarr_data, parameters)
 
     if algorithm == 'heaviside':
         return heaviside_bottom_detector.detect_bottom(zarr_data, parameters)
+
+    if algorithm == 'work_files':
+        return work_files_bottom_detector.detect_bottom(zarr_data, work_dir)
 
     if algorithm.startswith('constant'):
         # A very fast algorithm for testing and debugging.

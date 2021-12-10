@@ -4,27 +4,122 @@ import xarray as xr
 
 from bottomdetection.parameters import Parameters
 from bottomdetection import bottom_utils
+from bottomdetection import bottom_candidate
 
 
 def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) -> xr.DataArray:
     channel_index = 0
+    frequency = float(zarr_data['frequency'][channel_index])
     channel_sv = zarr_data['sv'][channel_index]
     threshold_sv = 10 ** (parameters.threshold_log_sv / 10)
 
     pulse_duration = float(zarr_data['pulse_length'][channel_index])
     heave_corrected_transducer_depth = zarr_data['heave'] + zarr_data['transducer_draft'][channel_index]
 
-    depth_ranges, indices = bottom_utils.detect_bottom_single_channel(channel_sv, threshold_sv, heave_corrected_transducer_depth,
+    stacked_sv = bottom_utils.stack_pings(channel_sv, heave_corrected_transducer_depth)
+
+    depth_ranges, indices = bottom_utils.detect_bottom_single_channel(stacked_sv, threshold_sv, heave_corrected_transducer_depth,
                                                                       pulse_duration, parameters.minimum_range)
 
-    depth_ranges_back_step, indices_back_step = back_step_hs(channel_sv, indices,
-                                                             0.001, 3e-3, minimum_range=parameters.minimum_range)
+    widths = bottom_utils.bottom_width(stacked_sv, indices, 0.1, frequency, pulse_duration)
 
-    bottom_depths = heave_corrected_transducer_depth + depth_ranges_back_step - parameters.offset
+    depth_ranges_back_step, indices_back_step, qualities = back_step(stacked_sv, indices, widths,
+                                                                     alpha=0.95, minimum_range=parameters.minimum_range)
+
+    # returning the candidate with the highest quality
+    bottom_depths = heave_corrected_transducer_depth + depth_ranges_back_step[:, 0] - parameters.offset
     bottom_depths = xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],
                                  coords={'ping_time': zarr_data['ping_time']})
     bottom_depths = bottom_depths.dropna('ping_time')
     return bottom_depths
+
+
+def _back_step_inner(v, di, width,
+                     start_index, max_candidates, alpha):
+    if di < 0 or np.isnan(width):
+        return -np.ones(max_candidates * 2)
+
+    vs = v[start_index:]
+    if len(vs) == 0:
+        return -np.ones(max_candidates * 2)
+
+    width = int(np.round(width))
+    n = width * 2 + 1  # length of kernel function
+    kernel = bottom_utils.create_gauss_derivative_kernel(n, width)
+    kernel[:width] *= alpha
+    kernel[width:] *= (1 - alpha)
+    a_hs = np.convolve(vs, np.flip(kernel), 'same')
+
+    peaks,_ = bottom_utils.find_peaks(a_hs, threshold=1e-6)
+    peaks = peaks[(peaks < di - start_index) & (peaks > di - start_index - 2 * len(kernel))]
+    if len(peaks) == 0:
+        return -np.ones(max_candidates * 2)
+
+    prominence_data = bottom_utils.peak_prominences(a_hs, peaks)
+    prominences = prominence_data[0]
+    peak_widths,_,_,_ = bottom_utils.peak_widths(a_hs, peaks, prominence_data)
+    quality = prominences / peak_widths
+    quality /= np.max(quality)
+
+    candidates = [bottom_candidate.BottomCandidate(i + start_index, False, q) for i, q in zip(peaks, quality)]
+    candidates.sort(key=lambda c: -c.quality)
+    candidate_indices = np.asarray([c.index for c in candidates])
+    candidate_qualities = np.asarray([c.quality for c in candidates])
+
+    if len(candidate_indices) > max_candidates:
+        candidate_indices = candidate_indices[:max_candidates]
+        candidate_qualities = candidate_qualities[:max_candidates]
+    else:
+        candidate_indices = np.pad(candidate_indices, (0, max_candidates - len(candidate_indices)), mode='constant', constant_values=-1)
+        candidate_qualities = np.pad(candidate_qualities, (0, max_candidates - len(candidate_qualities)), mode='constant', constant_values=0)
+
+    sv_threshold = 10 ** (-60.0 / 10)
+    candidate_indices_adjusted = [bottom_utils.possibly_small_backstep(v, threshold=sv_threshold, index=i) for i in candidate_indices]
+
+    return np.concatenate([candidate_indices_adjusted, candidate_qualities])
+
+
+def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_widths: xr.DataArray,
+              alpha=0.95, minimum_range=10.0):
+    """
+    Find minimum bottom depths by back stepping
+
+    :param sv_array: an array of sv values for a channel
+    :param depths_indices: sample indices of detected depth
+    :param bottom_widths: estimated widths of bottom echo
+    :param alpha: factor of the importance of having low values above compared to having high values below the bottom
+    :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
+    """
+
+    sample_dist = float(sv_array.range[1] - sv_array.range[0])
+    offset: int = max(int((minimum_range - sv_array.range[0]) / sample_dist), 0)
+
+    max_candidates = 3
+    back_step_indices = xr.apply_ufunc(_back_step_inner,
+                                       sv_array,
+                                       depths_indices,
+                                       bottom_widths,
+                                       input_core_dims=[['range'],
+                                                        [], []],
+                                       kwargs={'start_index': offset,
+                                               'max_candidates': max_candidates,
+                                               'alpha': alpha
+                                               },
+                                       vectorize=True,
+                                       dask='parallelized',
+                                       output_core_dims=[['candidates']],
+                                       dask_gufunc_kwargs = {'output_sizes': {'candidates': max_candidates*2}},
+                                       output_dtypes=[np.float32]
+                                       )
+
+    bottom_depths = sv_array.range[back_step_indices[:, :max_candidates].astype(np.int64)].where(back_step_indices[:, :max_candidates] >= 0, np.nan)
+
+    return xr.DataArray(name='bottom_depth_backstep', data=bottom_depths, dims=['ping_time', 'candidates'],
+                        coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
+           xr.DataArray(name='bottom_index_backstep', data=back_step_indices[:,:max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
+                        coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
+           xr.DataArray(name='quality', data=back_step_indices[:, max_candidates:], dims=['ping_time', 'candidates'],
+                        coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)})
 
 
 def _back_step_inner_hs(v, di, vi, heaviside, min_depth_value_fraction, abs_threshold, start_index):

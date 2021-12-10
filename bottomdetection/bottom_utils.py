@@ -1,9 +1,27 @@
 import numpy as np
 import xarray as xr
+import scipy.signal as si
 
 import warnings
 
-SOUND_VELOCITY = 1500  # not available in zarr-file?
+SOUND_VELOCITY = 1500.0  # not available in zarr-file?
+BEAM_WIDTH_ALONGSHIP = {
+    '18000': 11.0,
+    '38000': 7.1,
+    '70000': 7.1,
+    '120000': 7.1,
+    '200000': 7.1,
+    '364000': 7.1
+}
+BEAM_WIDTH_ATHWARTSHIP = {
+    '18000': 11.0,
+    '38000': 7.1,
+    '70000': 7.1,
+    '120000': 7.1,
+    '200000': 7.1,
+    '364000': 7.1
+}
+
 
 def shift_arr(arr, num, fill_value=np.nan):
     # faster than ndimage.shift
@@ -29,6 +47,31 @@ def stack_max(v, v_prev, v_next, shift, shift_prev, shift_next):
         return np.nanmax(np.stack([v, shift_arr(v_prev, shift_prev - shift), shift_arr(v_next, shift_next - shift)]), axis=0)
 
 
+
+
+def find_peaks(data, threshold):
+    return si.find_peaks(data, threshold=threshold)
+
+
+def peak_prominences(data, peaks):
+    return si.peak_prominences(data, peaks)
+
+
+def peak_widths(data, peaks, prominences):
+    return si.peak_widths(data, peaks, prominence_data=prominences)
+
+
+def gauss_derivative(i, center_index, b):
+    x  = i - center_index
+    return x * np.exp(-x * x / b)
+
+
+def create_gauss_derivative_kernel(n, center_index):
+    b = np.square(center_index / 2.0)
+    result = np.asarray([gauss_derivative(i, center_index, b) for i in range(n)])
+    return result
+
+
 def _mean_at_index(sv, index, radius):
     if index < 0:
         return np.nan
@@ -49,9 +92,8 @@ def mean_at_index(sv, indices, radius):
                         coords={'ping_time': sv.ping_time})
 
 
-def first_bottom_index(sv, threshold, depth_correction, pulse_duration, min_index):
+def first_bottom_index(sv, sample_dist, threshold, depth_correction, pulse_duration, min_index):
     m = sv.where((~np.isnan(sv)) & (sv >= threshold), other=-np.inf)
-    sample_dist = float(sv.range[1] - sv.range[0])
     offset: int = min_index
     bottom_indices = m[:, offset:].argmax(axis=1) + offset
     # check if max sv is at second bottom echo
@@ -65,37 +107,96 @@ def first_bottom_index(sv, threshold, depth_correction, pulse_duration, min_inde
     return best_indices.where(best_indices != offset, -1)
 
 
-def _bottom_width_inner(sv, sv_prev, sv_next, shift, shift_prev, shift_next, bottom_index, factor):
+def possibly_small_backstep(sv, threshold, index):
+    if index > 0 and sv[index] > threshold:
+        backstep_index = index
+        for i in range(max(0, index - 1), max(0, index - 2), -1):
+            if sv[i] < sv[backstep_index] * 0.75:
+                backstep_index = i
+        index = backstep_index
+    return index
+
+
+def min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration, bottom_index):
     if bottom_index < 0:
         return np.nan
-    max_sv_value = sv[bottom_index]
-    sv_array = stack_max(sv, sv_prev, sv_next, shift, shift_prev, shift_next)
 
-    ia = np.argmax(sv_array[:bottom_index][::-1] <= max_sv_value * factor)
-    ib = np.argmax(sv_array[bottom_index:] <= max_sv_value * factor)
-    return np.float32(ia + ib + 1)
+    pulse_thickness = pulse_duration * SOUND_VELOCITY / 2.0
+
+    if start_index < len(sv):
+        range = bottom_index * sample_dist
+        alpha = max(BEAM_WIDTH_ALONGSHIP.get(frequency, 7.1), BEAM_WIDTH_ATHWARTSHIP.get(frequency, 7.1)) / 2.0
+        return pulse_thickness + range* (1.0 / np.cos(np.radians(alpha)) - 1)
+
+    return pulse_thickness
 
 
-def bottom_width(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correction, factor):
+def _bottom_width_inner(sv, bottom_index, factor, frequency, start_index, sample_dist, pulse_duration):
+    if bottom_index < 0:
+        return np.nan
+    sv_array = sv # stack_max(sv, sv_prev, sv_next, shift, shift_prev, shift_next)
 
-    range_shift = np.round(depth_correction / (sv_array.range[1] - sv_array.range[0])).astype(int)
+    begin_index = bottom_index // 2
+    end_index = min(3 * bottom_index // 2, len(sv_array))
+    cumulative = np.cumsum(sv_array[begin_index:end_index])
+    sum = np.nansum(sv_array[begin_index:end_index])
+
+    bottom_begin = np.searchsorted(cumulative, sum * factor) + begin_index
+    bottom_end = np.searchsorted(cumulative, sum * (1 - factor)) + begin_index
+
+    quantile_thickness = np.float32(bottom_end - bottom_begin + 1)
+    minimum_thickness_meters = min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration, bottom_index)
+    minimum_thickness = int(np.round(minimum_thickness_meters / sample_dist))
+    return max(quantile_thickness, minimum_thickness)
+
+
+def bottom_width(sv_array: xr.DataArray, depths_indices: xr.DataArray, factor, frequency, pulse_duration, minimum_range=10.0):
+
+    sample_dist = float(sv_array.range[1] - sv_array.range[0])
+    start_index: int = max(int((minimum_range - sv_array.range[0]) / sample_dist), 0)
 
     data = xr.apply_ufunc(_bottom_width_inner,
                           sv_array,
-                          sv_array.shift(ping_time=1),
-                          sv_array.shift(ping_time=-1),
-                          range_shift,
-                          range_shift.shift(ping_time=1),
-                          range_shift.shift(ping_time=-1),
                           depths_indices,
-                          input_core_dims=[['range'], []],
-                          kwargs={'factor': factor},
+                          input_core_dims=[['range'],
+                                           []],
+                          kwargs={'factor': factor,
+                                  'frequency': frequency,
+                                  'start_index': start_index,
+                                  'sample_dist': sample_dist,
+                                  'pulse_duration': pulse_duration},
                           vectorize=True,
                           dask='parallelized',
                           output_dtypes=[np.float64]
                           )
     return xr.DataArray(name='bottom_width', data=data, dims=['ping_time'],
                         coords={'ping_time': sv_array.ping_time})
+
+
+def _stack_pings_inner(sv, sv_prev, sv_next, shift, shift_prev, shift_next):
+    return stack_max(sv, sv_prev, sv_next, shift, shift_prev, shift_next)
+
+
+def stack_pings(sv_array: xr.DataArray, depth_correction):
+    sample_dist = float(sv_array.range[1] - sv_array.range[0])
+    range_shift = np.round(depth_correction / sample_dist).astype(np.int32)
+    data = xr.apply_ufunc(_stack_pings_inner,
+                          sv_array,
+                          sv_array.shift(ping_time=1),
+                          sv_array.shift(ping_time=-1),
+                          range_shift,
+                          range_shift.shift(ping_time=1),
+                          range_shift.shift(ping_time=-1),
+                          input_core_dims=[['range'], ['range'], ['range'],
+                                           [], [], []],
+                          vectorize=True,
+                          dask='parallelized',
+                          output_core_dims=[['range']],
+                          output_dtypes=[np.float64]
+                          )
+    return xr.DataArray(name='stacked', data=data, dims=['ping_time', 'range'],
+                        coords={'ping_time': sv_array.ping_time, 'range':sv_array.range})
+
 
 
 def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, depth_correction, pulse_duration, minimum_range=10.0):
@@ -111,7 +212,11 @@ def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, dep
     """
     sample_dist = float(channel_sv.range[1] - channel_sv.range[0])
     offset: int = max(int((minimum_range - channel_sv.range[0]) / sample_dist), 0)
-    bottom_indices = first_bottom_index(channel_sv, threshold, depth_correction, pulse_duration, offset)
+    sample_dist = float(channel_sv.range[1] - channel_sv.range[0])
+
+
+
+    bottom_indices = first_bottom_index(channel_sv, sample_dist, threshold, depth_correction, pulse_duration, offset)
 
     bottom_depths = channel_sv.range[bottom_indices].where(bottom_indices > 0, np.nan)
     return xr.DataArray(name='bottom_depth', data=bottom_depths, dims=['ping_time'],

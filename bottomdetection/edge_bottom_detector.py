@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+A bottom detection based on edge detection.
+
+Copyright (c) 2021, Contributors to the CRIMAC project.
+Licensed under the MIT license.
+"""
 
 import numpy as np
 import xarray as xr
@@ -50,18 +57,18 @@ def _back_step_inner(v, di, width,
     kernel[width:] *= (1 - alpha)
     a_hs = np.convolve(vs, np.flip(kernel), 'same')
 
-    peaks,_ = bottom_utils.find_peaks(a_hs, threshold=1e-6)
+    peaks, _ = bottom_utils.find_peaks(a_hs, threshold=1e-6)
     peaks = peaks[(peaks < di - start_index) & (peaks > di - start_index - 2 * len(kernel))]
     if len(peaks) == 0:
         return -np.ones(max_candidates * 2)
 
     prominence_data = bottom_utils.peak_prominences(a_hs, peaks)
     prominences = prominence_data[0]
-    peak_widths,_,_,_ = bottom_utils.peak_widths(a_hs, peaks, prominence_data)
+    peak_widths, _, _, _ = bottom_utils.peak_widths(a_hs, peaks, prominence_data)
     quality = prominences / peak_widths
     quality /= np.max(quality)
 
-    candidates = [bottom_candidate.BottomCandidate(i + start_index, False, q) for i, q in zip(peaks, quality)]
+    candidates = [bottom_candidate.BottomCandidate(i + start_index, q) for i, q in zip(peaks, quality)]
     candidates.sort(key=lambda c: -c.quality)
     candidate_indices = np.asarray([c.index for c in candidates])
     candidate_qualities = np.asarray([c.quality for c in candidates])
@@ -88,6 +95,7 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_width
     :param depths_indices: sample indices of detected depth
     :param bottom_widths: estimated widths of bottom echo
     :param alpha: factor of the importance of having low values above compared to having high values below the bottom
+    :param minimum_range: the minimum range from the transducer
     :return: a data array of minimum bottom depths and the indices of the minimum bottom depths
     """
 
@@ -108,7 +116,7 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_width
                                        vectorize=True,
                                        dask='parallelized',
                                        output_core_dims=[['candidates']],
-                                       dask_gufunc_kwargs = {'output_sizes': {'candidates': max_candidates*2}},
+                                       dask_gufunc_kwargs={'output_sizes': {'candidates': max_candidates*2}},
                                        output_dtypes=[np.float32]
                                        )
 
@@ -116,7 +124,7 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_width
 
     return xr.DataArray(name='bottom_depth_backstep', data=bottom_depths, dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='bottom_index_backstep', data=back_step_indices[:,:max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
+           xr.DataArray(name='bottom_index_backstep', data=back_step_indices[:, :max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
            xr.DataArray(name='quality', data=back_step_indices[:, max_candidates:], dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)})

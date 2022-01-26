@@ -9,6 +9,10 @@ Licensed under the MIT license.
 import numpy as np
 import xarray as xr
 import scipy.signal as si
+import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
+
+from bottomdetection import bottom_candidate
 
 import warnings
 
@@ -65,6 +69,26 @@ def peak_prominences(data, peaks):
 
 def peak_widths(data, peaks, prominences):
     return si.peak_widths(data, peaks, prominence_data=prominences)
+
+
+def sorted_candidates(max_candidates, peaks, quality, start_index):
+    candidates = [bottom_candidate.BottomCandidate(i + start_index, q) for i, q in zip(peaks, quality)]
+    candidates.sort(key=lambda c: -c.quality)
+    candidate_indices = np.asarray([c.index for c in candidates])
+    candidate_qualities = np.asarray([c.quality for c in candidates])
+    if len(candidate_indices) > max_candidates:
+        candidate_indices = candidate_indices[:max_candidates]
+        candidate_qualities = candidate_qualities[:max_candidates]
+    else:
+        candidate_indices = np.pad(candidate_indices, (0, max_candidates - len(candidate_indices)), mode='constant', constant_values=-1)
+        candidate_qualities = np.pad(candidate_qualities, (0, max_candidates - len(candidate_qualities)), mode='constant', constant_values=0)
+    return candidate_indices, candidate_qualities
+
+
+def step_kernel(center_index):
+    step = np.repeat(np.array([-1, 1.0]), center_index)
+    step = np.insert(step, center_index, 1.0)
+    return step
 
 
 def gauss_derivative(i, center_index, b):
@@ -130,14 +154,14 @@ def min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration
     pulse_thickness = pulse_duration * SOUND_VELOCITY / 2.0
 
     if start_index < len(sv):
-        bottom_range = bottom_index * sample_dist
+        max_bottom_range = bottom_index * sample_dist
         alpha = max(BEAM_WIDTH_ALONGSHIP.get(frequency, 7.1), BEAM_WIDTH_ATHWARTSHIP.get(frequency, 7.1)) / 2.0
-        return pulse_thickness + bottom_range * (1.0 / np.cos(np.radians(alpha)) - 1)
+        return pulse_thickness + max_bottom_range * (1.0 / np.cos(np.radians(alpha)) - 1)
 
     return pulse_thickness
 
 
-def _bottom_width_inner(sv, bottom_index, factor, frequency, start_index, sample_dist, pulse_duration):
+def _bottom_range_inner(sv, bottom_index, factor):
     if bottom_index < 0:
         return np.nan
 
@@ -149,9 +173,15 @@ def _bottom_width_inner(sv, bottom_index, factor, frequency, start_index, sample
     bottom_begin = np.searchsorted(cumulative, sv_sum * factor) + begin_index
     bottom_end = np.searchsorted(cumulative, sv_sum * (1 - factor)) + begin_index
 
+    return np.asarray([bottom_begin, bottom_end])
+
+
+def _bottom_width_inner(sv, bottom_index, factor, frequency, start_index, sample_dist, pulse_duration):
+    bottom_begin, bottom_end = _bottom_range_inner(sv, bottom_index, factor)
+
     quantile_thickness = np.float32(bottom_end - bottom_begin + 1)
     minimum_thickness_meters = min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration, bottom_index)
-    minimum_thickness = int(np.round(minimum_thickness_meters / sample_dist))
+    minimum_thickness = minimum_thickness_meters / sample_dist
     return max(quantile_thickness, minimum_thickness)
 
 
@@ -176,6 +206,25 @@ def bottom_width(sv_array: xr.DataArray, depths_indices: xr.DataArray, factor, f
                           )
     return xr.DataArray(name='bottom_width', data=data, dims=['ping_time'],
                         coords={'ping_time': sv_array.ping_time})
+
+
+def bottom_range(sv_array: xr.DataArray, depths_indices: xr.DataArray, factor):
+
+    begin_end = 2
+    data = xr.apply_ufunc(_bottom_range_inner,
+                          sv_array,
+                          depths_indices,
+                          input_core_dims=[['range'],
+                                           []],
+                          kwargs={'factor': factor},
+                          vectorize=True,
+                          dask='parallelized',
+                          output_core_dims=[['begin_end']],
+                          dask_gufunc_kwargs={'output_sizes': {'begin_end': begin_end}},
+                          output_dtypes=[np.int64]
+                          )
+    return xr.DataArray(name='bottom_range', data=data, dims=['ping_time', 'begin_end'],
+                        coords={'ping_time': sv_array.ping_time, 'begin_end': range(begin_end)})
 
 
 def _stack_pings_inner(sv, sv_prev, sv_next, shift, shift_prev, shift_next):
@@ -203,10 +252,119 @@ def stack_pings(sv_array: xr.DataArray, depth_correction):
                         coords={'ping_time': sv_array.ping_time, 'range': sv_array.range})
 
 
+def clamp(x, minimum, maximum):
+    return max(minimum, min(x, maximum))
+
+
+def is_local_minimum(sv, i, radius):
+    a = np.max(sv[i - radius:i])
+    b = np.max(sv[i + 1:min(i + 1 + radius, len(sv))])
+    return sv[i] < a and sv[i] < b
+
+
+def max_rolling(a, window, axis=1):
+    shape = a.shape[:-1] + (a.shape[-1] - window + 1, window)
+    strides = a.strides + (a.strides[-1],)
+    rolling = np.lib.stride_tricks.as_strided(a, shape=shape, strides=strides)
+    return np.max(rolling, axis=axis)
+
+
+def _local_maxima_simple(values):
+    return np.argwhere((values[1:-1] > values[:-2]) & (values[1:-1] > values[2:])).ravel() + 1
+
+
+def local_maxima(values, radius):
+    if radius == 1:
+        return _local_maxima_simple(values)
+    local_max = np.asarray(pd.Series(values).rolling(radius, min_periods=1).min())
+    return np.argwhere((values[radius:-radius] > local_max[radius - 1:-radius - 1]) & (values[radius:-radius] > local_max[2 * radius:])).ravel() + radius
+
+
+def _local_minima_simple(values):
+    return np.argwhere((values[1:-1] < values[:-2]) & (values[1:-1] < values[2:])).ravel() + 1
+
+
+def local_minima(values, radius):
+    if radius == 0:
+        return _local_minima_simple(values)
+    local_max = np.asarray(pd.Series(values).rolling(radius, min_periods=1).max())
+    return np.argwhere((values[radius:-radius] < local_max[radius - 1:-radius - 1]) & (values[radius:-radius] < local_max[2 * radius:])).ravel() + radius
+
+
+def masked_array(data, index_mask):
+    mask = np.zeros_like(data)
+    mask[index_mask] = 1
+    mask[np.where(np.isnan(data), 1, 0)] = 1
+    return np.ma.masked_array(data, mask)
+
+
+def _filter_angles_inner(sv, sv_prev, sv_next, angles, angles_prev, angles_next, shift, shift_prev, shift_next):
+    if len(sv) == 0 or np.isnan(sv).all():
+        return np.empty(0)
+    if len(sv_prev) == 0 or np.isnan(sv_prev).all():
+        sv_prev = sv
+        angles_prev = angles
+        shift_prev = shift
+    if len(sv_next) == 0 or np.isnan(sv_next).all():
+        sv_next = sv
+        angles_next = angles
+        shift_next = shift
+    prev_first_index = int(shift - shift_prev)
+    next_first_index = int(shift - shift_next)
+
+    median_radius = 2
+    min_sv_radius = 2
+
+    minima_prev = local_minima(sv_prev, min_sv_radius)
+    minima_center = local_minima(sv, min_sv_radius)
+    minima_next = local_minima(sv_next, min_sv_radius)
+
+    angles_prev_masked = angles_prev.copy()
+    angles_prev_masked[minima_prev] = np.nan
+    angles_masked = angles.copy()
+    angles_masked[minima_center] = np.nan
+    angles_next_masked = angles_next.copy()
+    angles_next_masked[minima_next] = np.nan
+
+    angles_masked_rolling = sliding_window_view(angles_masked, window_shape=median_radius * 2 + 1)
+    angles_prev_masked_rolling = sliding_window_view(shift_arr(angles_prev_masked, -prev_first_index), window_shape=median_radius * 2 + 1)
+    angles_next_masked_rolling = sliding_window_view(shift_arr(angles_next_masked, -next_first_index), window_shape=median_radius * 2 + 1)
+    stacked_rolling = np.hstack((angles_masked_rolling,
+                                 angles_prev_masked_rolling,
+                                 angles_next_masked_rolling))
+    median = np.nanmedian(stacked_rolling, axis=1)
+    return np.pad(median, (median_radius, median_radius), 'constant', constant_values=np.nan)
+
+
+def filter_angles(sv_array: xr.DataArray, angles: xr.DataArray, depth_correction):
+    sample_dist = float(sv_array.range[1] - sv_array.range[0])
+    range_shift = np.round(depth_correction / sample_dist).astype(np.int32)
+
+    filtered_angles = xr.apply_ufunc(_filter_angles_inner,
+                                     sv_array,
+                                     sv_array.shift(ping_time=1),
+                                     sv_array.shift(ping_time=-1),
+                                     angles,
+                                     angles.shift(ping_time=1),
+                                     angles.shift(ping_time=-1),
+                                     range_shift,
+                                     range_shift.shift(ping_time=1),
+                                     range_shift.shift(ping_time=-1),
+                                     input_core_dims=[['range'], ['range'], ['range'],
+                                                      ['range'], ['range'], ['range'],
+                                                      [], [], []],
+                                     vectorize=True,
+                                     dask='parallelized',
+                                     output_core_dims=[['range']],
+                                     output_dtypes=[np.float64]
+                                     )
+    return xr.DataArray(name='filtered_angles', data=filtered_angles, dims=['ping_time', 'range'],
+                        coords={'ping_time': sv_array.ping_time, 'range': sv_array.range})
+
+
 def detect_bottom_single_channel(channel_sv: xr.DataArray, threshold: float, depth_correction, pulse_duration, minimum_range=10.0):
     """
     Detect bottom depths on one channel in the sv-array
-
     :param channel_sv: an array of log-sv values
     :param threshold: a minimum threshold for bottom depth strength
     :param depth_correction: the recorded depth correction (heave plus transducer draft)

@@ -11,7 +11,6 @@ import xarray as xr
 
 from bottomdetection.parameters import Parameters
 from bottomdetection import bottom_utils
-from bottomdetection import bottom_candidate
 
 
 def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) -> xr.DataArray:
@@ -68,17 +67,7 @@ def _back_step_inner(v, di, width,
     quality = prominences / peak_widths
     quality /= np.max(quality)
 
-    candidates = [bottom_candidate.BottomCandidate(i + start_index, q) for i, q in zip(peaks, quality)]
-    candidates.sort(key=lambda c: -c.quality)
-    candidate_indices = np.asarray([c.index for c in candidates])
-    candidate_qualities = np.asarray([c.quality for c in candidates])
-
-    if len(candidate_indices) > max_candidates:
-        candidate_indices = candidate_indices[:max_candidates]
-        candidate_qualities = candidate_qualities[:max_candidates]
-    else:
-        candidate_indices = np.pad(candidate_indices, (0, max_candidates - len(candidate_indices)), mode='constant', constant_values=-1)
-        candidate_qualities = np.pad(candidate_qualities, (0, max_candidates - len(candidate_qualities)), mode='constant', constant_values=0)
+    candidate_indices, candidate_qualities = bottom_utils.sorted_candidates(max_candidates, peaks, quality, start_index)
 
     sv_threshold = 10 ** (-60.0 / 10)
     candidate_indices_adjusted = [bottom_utils.possibly_small_backstep(v, threshold=sv_threshold, index=i) for i in candidate_indices]
@@ -177,7 +166,6 @@ def back_step_hs(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth
                  abs_backstep_threshold, alpha=0.95, minimum_range=10.0):
     """
     Find minimum bottom depths by back stepping
-
     :param sv_array: an array of sv values for a channel
     :param depths_indices: sample indices of detected depth
     :param min_depth_value_fraction: a fraction of the detected bottom echo strength

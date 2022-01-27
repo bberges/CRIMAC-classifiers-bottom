@@ -51,12 +51,12 @@ def shift_arr(arr, num, fill_value=np.nan):
 
 def stack_max(v, v_prev, v_next, shift, shift_prev, shift_next):
     # stack previous and next array and take max
-    shift_prev = int(shift_prev) if not np.isnan(shift_prev) else shift
-    shift_next = int(shift_next) if not np.isnan(shift_next) else shift
+    shift_diff_prev = int(np.round(shift_prev - shift)) if not np.isnan(shift_prev) else 0
+    shift_diff_next = int(np.round(shift_next - shift)) if not np.isnan(shift_next) else 0
     # ignore warnings when all arrays have nan in the same position
     with warnings.catch_warnings():
         warnings.filterwarnings(action='ignore', message='All-NaN slice encountered')
-        return np.nanmax(np.stack([v, shift_arr(v_prev, shift_prev - shift), shift_arr(v_next, shift_next - shift)]), axis=0)
+        return np.nanmax(np.stack([v, shift_arr(v_prev, shift_diff_prev), shift_arr(v_next, shift_diff_next)]), axis=0)
 
 
 def find_peaks(data, threshold):
@@ -140,7 +140,7 @@ def first_bottom_index(sv, sample_dist, threshold, depth_correction, pulse_durat
 def possibly_small_backstep(sv, threshold, index):
     if index > 0 and sv[index] > threshold:
         backstep_index = index
-        for i in range(max(0, index - 1), max(0, index - 2), -1):
+        for i in range(max(0, index - 1), max(0, index - 3), -1):
             if sv[i] < sv[backstep_index] * 0.75:
                 backstep_index = i
         index = backstep_index
@@ -233,7 +233,7 @@ def _stack_pings_inner(sv, sv_prev, sv_next, shift, shift_prev, shift_next):
 
 def stack_pings(sv_array: xr.DataArray, depth_correction):
     sample_dist = float(sv_array.range[1] - sv_array.range[0])
-    range_shift = np.round(depth_correction / sample_dist).astype(np.int32)
+    range_shift = depth_correction / sample_dist
     data = xr.apply_ufunc(_stack_pings_inner,
                           sv_array,
                           sv_array.shift(ping_time=1),

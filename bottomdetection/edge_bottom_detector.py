@@ -41,7 +41,7 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
 
 
 def _back_step_inner(v, di, width,
-                     start_index, max_candidates, alpha):
+                     start_index, max_candidates, alpha, sample_distance):
     if di < 0 or np.isnan(width):
         return -np.ones(max_candidates * 2)
 
@@ -56,7 +56,7 @@ def _back_step_inner(v, di, width,
     kernel[width:] *= (1 - alpha)
     a_hs = np.convolve(vs, np.flip(kernel), 'same')
 
-    peaks, _ = bottom_utils.find_peaks(a_hs, threshold=1e-6)
+    peaks, _ = bottom_utils.find_peaks(a_hs, threshold=None)
     peaks = peaks[(peaks < di - start_index) & (peaks > di - start_index - 2 * len(kernel))]
     if len(peaks) == 0:
         return -np.ones(max_candidates * 2)
@@ -64,7 +64,7 @@ def _back_step_inner(v, di, width,
     prominence_data = bottom_utils.peak_prominences(a_hs, peaks)
     prominences = prominence_data[0]
     peak_widths, _, _, _ = bottom_utils.peak_widths(a_hs, peaks, prominence_data)
-    quality = prominences / peak_widths
+    quality = prominences / (peak_widths * sample_distance)
     quality /= np.max(quality)
 
     candidate_indices, candidate_qualities = bottom_utils.sorted_candidates(max_candidates, peaks, quality, start_index)
@@ -100,7 +100,8 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_width
                                                         [], []],
                                        kwargs={'start_index': offset,
                                                'max_candidates': max_candidates,
-                                               'alpha': alpha
+                                               'alpha': alpha,
+                                               'sample_distance': sample_dist
                                                },
                                        vectorize=True,
                                        dask='parallelized',

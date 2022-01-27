@@ -72,7 +72,7 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correc
     """
     segment_distance = 5
     segment_nsamples: int = int(segment_distance / (sv_array.range[1] - sv_array.range[0]))
-    range_shift = np.round(depth_correction / (sv_array.range[1] - sv_array.range[0])).astype(int)
+    range_shift = depth_correction / (sv_array.range[1] - sv_array.range[0])
 
     back_step_indices = xr.apply_ufunc(_back_step_inner,
                                        sv_array,

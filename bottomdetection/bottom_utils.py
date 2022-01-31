@@ -105,7 +105,11 @@ def create_gauss_derivative_kernel(n, center_index):
 def _mean_at_index(sv, index, radius):
     if index < 0:
         return np.nan
-    return np.nanmean(sv[max(0, index - radius):min(len(sv), index + radius)])
+    start = max(0, index - radius)
+    end = min(len(sv), index + radius)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(action='ignore', message='Mean of empty slice')
+        return 0 if end <= start else np.nanmean(sv[start:end])
 
 
 def mean_at_index(sv, indices, radius):
@@ -118,6 +122,7 @@ def mean_at_index(sv, indices, radius):
                           dask='parallelized',
                           output_dtypes=[np.float64]
                           )
+    data = data.where(~np.isnan(data), other=0)
     return xr.DataArray(name='mean_at_index', data=data, dims=['ping_time'],
                         coords={'ping_time': sv.ping_time})
 
@@ -163,7 +168,7 @@ def min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration
 
 def _bottom_range_inner(sv, bottom_index, factor):
     if bottom_index < 0:
-        return np.nan
+        return [-1, -1]
 
     begin_index = bottom_index // 2
     end_index = min(3 * bottom_index // 2, len(sv))
@@ -179,7 +184,7 @@ def _bottom_range_inner(sv, bottom_index, factor):
 def _bottom_width_inner(sv, bottom_index, factor, frequency, start_index, sample_dist, pulse_duration):
     bottom_begin, bottom_end = _bottom_range_inner(sv, bottom_index, factor)
 
-    quantile_thickness = np.float32(bottom_end - bottom_begin + 1)
+    quantile_thickness = np.float32(bottom_end - bottom_begin + 1) if bottom_begin > 0 else 0
     minimum_thickness_meters = min_bottom_thickness(sv, frequency, start_index, sample_dist, pulse_duration, bottom_index)
     minimum_thickness = minimum_thickness_meters / sample_dist
     return max(quantile_thickness, minimum_thickness)
@@ -300,7 +305,7 @@ def masked_array(data, index_mask):
 
 def _filter_angles_inner(sv, sv_prev, sv_next, angles, angles_prev, angles_next, shift, shift_prev, shift_next):
     if len(sv) == 0 or np.isnan(sv).all():
-        return np.empty(0)
+        return np.zeros_like(sv)
     if len(sv_prev) == 0 or np.isnan(sv_prev).all():
         sv_prev = sv
         angles_prev = angles

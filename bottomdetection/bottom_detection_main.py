@@ -22,6 +22,7 @@ from bottomdetection import bottom_annotation
 from bottomdetection import simple_bottom_detector
 from bottomdetection import edge_bottom_detector
 from bottomdetection import angle_bottom_detector
+from bottomdetection import combined_bottom_detector
 from bottomdetection import work_files_bottom_detector
 from bottomdetection.parameters import Parameters
 
@@ -93,6 +94,9 @@ def detect_bottom(zarr_data: xr.Dataset, work_dir: str, algorithm: str, paramete
 
     if algorithm == 'angles':
         return angle_bottom_detector.detect_bottom(zarr_data, parameters)
+
+    if algorithm == 'combined':
+        return combined_bottom_detector.detect_bottom(zarr_data, parameters)
 
     if algorithm == 'work_files':
         return work_files_bottom_detector.detect_bottom(zarr_data, work_dir)

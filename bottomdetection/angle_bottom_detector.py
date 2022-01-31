@@ -1,5 +1,7 @@
 import numpy as np
 import xarray as xr
+from numpy.lib.stride_tricks import sliding_window_view
+from numba import njit
 
 from bottomdetection.parameters import Parameters
 from bottomdetection import bottom_utils
@@ -7,6 +9,7 @@ from bottomdetection import bottom_utils
 
 def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) -> xr.DataArray:
     channel_index = 0
+
     channel_sv = zarr_data['sv'][channel_index]
     angle_alongship = zarr_data['angle_alongship'][channel_index]
     angle_athwartship = zarr_data['angle_athwartship'][channel_index]
@@ -25,7 +28,7 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     angle_alongship_filtered = bottom_utils.filter_angles(channel_sv, angle_alongship, heave_corrected_transducer_depth)
     angle_athwartship_filtered = bottom_utils.filter_angles(channel_sv, angle_athwartship, heave_corrected_transducer_depth)
 
-    depth_ranges_angles, indices_angles, qualities = detect_from_angles(angle_alongship_filtered, angle_athwartship_filtered, bottom_ranges)
+    depth_ranges_angles, indices_angles, qualities, r_squared_mean = detect_from_angles(angle_alongship_filtered, angle_athwartship_filtered, bottom_ranges)
 
     # returning the candidate with the highest quality
     bottom_depths = heave_corrected_transducer_depth + depth_ranges_angles[:, 0] - parameters.offset
@@ -35,18 +38,16 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     return bottom_depths
 
 
-def _local_top_value(values, i):
+def _local_top_values(values):
     n = 3
-    ia = max(i - n, 0)
-    ib = min(i + n + 1, len(values))
-    va = np.mean(values[ia:i])
-    vb = np.mean(values[i+1:ib])
-    return 2 * values[i] - (va + vb)  # -second derivative
+    rolling_mean = sliding_window_view(values, window_shape=n).mean(axis=1)
+    rolling_mean = np.pad(rolling_mean, (n, n), 'constant', constant_values=np.nan)
+    return 2 * values - (rolling_mean[:-n-1] + rolling_mean[n+1:])  # -second derivative
 
 
-def _find_bottom_index(i_begin, i_end, r_squared):
+def _find_bottom_index(i_begin, i_end, r_squared, local_top_values):
     r_squared_begin = r_squared[i_begin]
-    v = np.asarray([abs(r_squared[i] - r_squared_begin) * _local_top_value(r_squared, i) for i in range(i_begin, i_end - 2)])
+    v = abs(r_squared[i_begin:i_end - 2] - r_squared_begin) * local_top_values[i_begin:i_end - 2]
     return np.argmax(v) + i_begin if len(v) > 0 else i_begin
 
 
@@ -66,8 +67,8 @@ def _find_local_minima_after(i, minima_sorted):
         return np.nan
 
 
-def _new_bottom_candidate(i_convolution_peak, i_end, convolution, convolution_minima, r_squared):
-    i_bottom = _find_bottom_index(i_convolution_peak, i_end, r_squared)
+def _new_bottom_candidate(i_convolution_peak, i_end, convolution, convolution_minima, r_squared, local_top_values):
+    i_bottom = _find_bottom_index(i_convolution_peak, i_end, r_squared, local_top_values)
 
     idx_peak_before = _find_local_minima_before(i_convolution_peak, convolution_minima)
     idx_peak_after = _find_local_minima_after(i_convolution_peak, convolution_minima)
@@ -86,12 +87,14 @@ def _make_candidates(indices, max_index, i_end, convolution, r_squared):
     convolution_minima = bottom_utils.local_minima(convolution, 1)
     candidate_indices = []
     candidate_qualities = []
-    idx, q = _new_bottom_candidate(max_index, i_end if len(indices) == 0 else indices[0], convolution, convolution_minima, r_squared)
+    local_top_values = _local_top_values(r_squared)
+    idx, q = _new_bottom_candidate(max_index, i_end if len(indices) == 0 else indices[0], convolution, convolution_minima, r_squared,
+                                   local_top_values)
     candidate_indices.append(idx)
     candidate_qualities.append(q)
     for i, elem in enumerate(indices):
         next_i = i_end if len(indices) <= i + 1 else indices[i+1]
-        idx, q = _new_bottom_candidate(elem, next_i, convolution, convolution_minima, r_squared)
+        idx, q = _new_bottom_candidate(elem, next_i, convolution, convolution_minima, r_squared, local_top_values)
         candidate_indices.append(idx)
         candidate_qualities.append(q)
     return candidate_indices, candidate_qualities
@@ -100,17 +103,20 @@ def _make_candidates(indices, max_index, i_end, convolution, r_squared):
 def _detect_from_angles_inner(angles_alongship, angles_athwartship, bottom_range, sample_dist, max_candidates):
     begin_index = bottom_range[0]
     end_index = bottom_range[1]
+    if begin_index < 0:
+        return -np.ones(max_candidates * 2 + 1)
 
-    lin_regress = LinearRegression()
-    along_r_squared = np.flip(np.asarray([lin_regress.add_point(i, angles_alongship[i]) for i in np.linspace(end_index, 0, end_index + 1, dtype=np.int32)]))
-    lin_regress = LinearRegression()
-    athwart_r_squared = np.flip(np.asarray([lin_regress.add_point(i, angles_athwartship[i]) for i in np.linspace(end_index, 0, end_index + 1, dtype=np.int32)]))
+    along_r_squared = linear_regression(angles_alongship, end_index)
+    athwart_r_squared = linear_regression(angles_athwartship, end_index)
     along_r_squared = np.where(np.isnan(along_r_squared), 0, along_r_squared)
     athwart_r_squared = np.where(np.isnan(athwart_r_squared), 0, athwart_r_squared)
 
     i_test_min = max(0, begin_index - (end_index - begin_index))
 
+    along_r_squared_mean = np.mean(along_r_squared[i_test_min:begin_index])
+    athwart_r_squared_mean = np.mean(athwart_r_squared[i_test_min:begin_index])
     along_fits_best = np.max(along_r_squared[i_test_min:begin_index]) > np.max(athwart_r_squared[i_test_min:begin_index])
+    #along_fits_best = along_r_squared_mean > athwart_r_squared_mean
     best_r_squared = along_r_squared if along_fits_best else athwart_r_squared
 
     k = int(np.round(2.0 / sample_dist))
@@ -127,7 +133,9 @@ def _detect_from_angles_inner(angles_alongship, angles_athwartship, bottom_range
     candidate_indices, qualities = _make_candidates(peaks, arg_max_conv, begin_index, convolution, best_r_squared)
     candidate_indices, candidate_qualities = bottom_utils.sorted_candidates(max_candidates, candidate_indices, qualities, 0)
 
-    return np.concatenate([candidate_indices, candidate_qualities])
+    r_squared_mean = along_r_squared_mean if along_fits_best else athwart_r_squared_mean
+
+    return np.concatenate([candidate_indices, candidate_qualities, [r_squared_mean]])
 
 
 def detect_from_angles(angles_alongship, angles_athwartship, ranges):
@@ -154,7 +162,7 @@ def detect_from_angles(angles_alongship, angles_athwartship, ranges):
                              vectorize=True,
                              dask='parallelized',
                              output_core_dims=[['candidates']],
-                             dask_gufunc_kwargs={'output_sizes': {'candidates': max_candidates*2}},
+                             dask_gufunc_kwargs={'output_sizes': {'candidates': max_candidates * 2 + 1}},
                              output_dtypes=[np.float32]
                              )
 
@@ -165,52 +173,60 @@ def detect_from_angles(angles_alongship, angles_athwartship, ranges):
            xr.DataArray(name='bottom_index_angles', data=indices[:, :max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
                         coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)}), \
            xr.DataArray(name='quality', data=indices[:, max_candidates:max_candidates*2], dims=['ping_time', 'candidates'],
-                        coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)})
+                        coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)}), \
+           xr.DataArray(name='r_squared_mean', data=indices[:, max_candidates * 2], dims=['ping_time'],
+                        coords={'ping_time': angles_alongship.ping_time})
 
 
-class LinearRegression:
+@njit
+def linear_regression(values, end_index):
+    x_bar = 0
+    y_bar = 0
+    sum_x = 0
+    sum_y = 0
+    sum_xx = 0
+    sum_yy = 0
+    sum_xy = 0
+    n = 0
 
-    def __init__(self):
-        self.x_bar = 0
-        self.y_bar = 0
-        self.sum_x = 0
-        self.sum_y = 0
-        self.sum_xx = 0
-        self.sum_yy = 0
-        self.sum_xy = 0
-        self.n = 0
-
-    def add_point(self, x, y):
-        if self.n == 0:
-            self.x_bar = x
-            self.y_bar = y
-        else:
-            f1 = 1.0 + self.n
-            f2 = self.n / (1.0 + self.n)
-            dx = x - self.x_bar
-            dy = y - self.y_bar
-            self.sum_xx += dx * dx * f2
-            self.sum_yy += dy * dy * f2
-            self.sum_xy += dx * dy * f2
-            self.x_bar += dx / f1
-            self.y_bar += dy / f1
-        self.sum_x += x
-        self.sum_y += y
-        self.n += 1
-        return self.r_square()
-
-    def total_sum_squares(self):
-        if self.n < 2:
+    def total_sum_squares(n, sum_yy):
+        if n < 2:
             return np.nan
-        return self.sum_yy
+        return sum_yy
 
-    def sum_squared_errors(self):
-        if self.n < 2:
+    def sum_squared_errors(n, sum_xx, sum_xy, sum_yy):
+        if n < 2:
             return np.nan
-        return max(0.0, self.sum_yy - self.sum_xy * self.sum_xy / self.sum_xx)
+        return max(0.0, sum_yy - sum_xy * sum_xy / sum_xx)
 
-    def r_square(self):
-        ssto = self.total_sum_squares()
+    def r_square(n, sum_xx, sum_xy, sum_yy):
+        ssto = total_sum_squares(n, sum_yy)
         if np.isnan(ssto) or ssto == 0:
             return np.nan
-        return (ssto - self.sum_squared_errors()) / ssto
+        return (ssto - sum_squared_errors(n, sum_xx, sum_xy, sum_yy)) / ssto
+
+    def add_point(x, y, n, x_bar, y_bar, sum_x, sum_y, sum_xx, sum_yy, sum_xy):
+        if n == 0:
+            x_bar = x
+            y_bar = y
+        else:
+            f1 = 1.0 + n
+            f2 = n / (1.0 + n)
+            dx = x - x_bar
+            dy = y - y_bar
+            sum_xx += dx * dx * f2
+            sum_yy += dy * dy * f2
+            sum_xy += dx * dy * f2
+            x_bar += dx / f1
+            y_bar += dy / f1
+        sum_x += x
+        sum_y += y
+        n += 1
+        return n, x_bar, y_bar, sum_x, sum_y, sum_xx, sum_yy, sum_xy, r_square(n, sum_xx, sum_xy, sum_yy)
+
+    result = []
+    for i in np.linspace(end_index, 0, end_index + 1).astype(np.int32):
+        n, x_bar, y_bar, sum_x, sum_y, sum_xx, sum_yy, sum_xy, r_sq = add_point(i, values[i], n, x_bar, y_bar, sum_x, sum_y, sum_xx, sum_yy, sum_xy)
+        result.append(r_sq)
+    return np.flip(np.asarray(result))
+

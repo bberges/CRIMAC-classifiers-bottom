@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+"""
+A bottom detection based on phase angles.
+
+Copyright (c) 2022, Contributors to the CRIMAC project.
+Licensed under the MIT license.
+"""
+
 import numpy as np
 import xarray as xr
 from numpy.lib.stride_tricks import sliding_window_view

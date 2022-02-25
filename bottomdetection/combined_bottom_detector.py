@@ -1,3 +1,11 @@
+# -*- coding: utf-8 -*-
+"""
+Combines the angle and the edge bottom detectors.
+
+Copyright (c) 2022, Contributors to the CRIMAC project.
+Licensed under the MIT license.
+"""
+
 import numpy as np
 import xarray as xr
 

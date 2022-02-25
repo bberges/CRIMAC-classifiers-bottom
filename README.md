@@ -25,14 +25,19 @@ Options as environment variables:
       * `.nc`
       * `.zarr`
 3. `ALGORITHM` - Optional. The bottom detection algorithm to use:
-    * `constant` - A very fast algorithm for testing and debugging.
-    * `simple` - A very simple threshold based algorithm.
-    * `work_files` - Uses the lowest layer boundary in LSSS work files as the detected bottom. 
-      The `/work_dir` directory must be mounted.
+   * `angles` - For data with sloping bottom. Used by the `combined` algorithm.
+   * `combined` - A combination of the `edge` and `angles` algorithms.
+   * `constant` - A very fast algorithm for testing and debugging.
+   * `edge` - For data with flat bottom. Used by the `combined` algorithm.
+   * `simple` - Backstepping from maximum s<sub>v</sub>.
+   * `work_files` - Uses the lowest layer boundary in LSSS work files as the detected bottom.
+     The `/work_dir` directory must be mounted.
+
+   See more details in a separate document on the [bottom detection algoritms](doc/BottomDetectionAlgorithms.md).
 4. Algorithm parameters. Optional.
    * `PARAMETER_minimum_range` \[m] - The minimum range of the detected bottom.
    * `PARAMETER_offset` \[m] - Additional offset to the bottom after backstepping.
-   * `PARAMETER_threshold_log_sv` \[dB] - The minimum Sv value for detecting bottom.
+   * `PARAMETER_threshold_log_sv` \[dB] - The minimum S<sub>v</sub> value for detecting bottom.
 
 Example:
 ```bash

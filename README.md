@@ -33,7 +33,7 @@ Options as environment variables:
    * `work_files` - Uses the lowest layer boundary in LSSS work files as the detected bottom.
      The `/work_dir` directory must be mounted.
 
-   See more details in a separate document on the [bottom detection algoritms](doc/BottomDetectionAlgorithms.md).
+   See more details in a separate document on the [bottom detection algorithms](doc/BottomDetectionAlgorithms.md).
 4. Algorithm parameters. Optional.
    * `PARAMETER_minimum_range` \[m] - The minimum range of the detected bottom.
    * `PARAMETER_offset` \[m] - Additional offset to the bottom after backstepping.

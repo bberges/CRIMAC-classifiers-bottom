@@ -110,19 +110,22 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, bottom_width
                                        output_dtypes=[np.float32]
                                        )
 
-    bottom_depths = sv_array.range[back_step_indices[:, :max_candidates].astype(np.int64)].where(back_step_indices[:, :max_candidates] >= 0, np.nan)
+    indices = back_step_indices[:, :max_candidates]
+    qualities = back_step_indices[:, max_candidates:]
+    bottom_depths = sv_array.range[indices.astype(np.int64)].where(indices >= 0, np.nan)
 
     return xr.DataArray(name='bottom_depth_backstep', data=bottom_depths, dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='bottom_index_backstep', data=back_step_indices[:, :max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
+           xr.DataArray(name='bottom_index_backstep', data=indices.astype(np.int64), dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='quality', data=back_step_indices[:, max_candidates:], dims=['ping_time', 'candidates'],
+           xr.DataArray(name='quality', data=qualities, dims=['ping_time', 'candidates'],
                         coords={'ping_time': sv_array.ping_time, 'candidates': range(max_candidates)})
 
 
-def _back_step_inner_hs(v, di, vi, heaviside, min_depth_value_fraction, abs_threshold, start_index):
+def _back_step_inner_hs(v, di, heaviside, min_depth_value_fraction, abs_threshold, start_index):
     if di < 0:
         return -1
+    vi = v[di]
 
     hs_half_length = len(heaviside) // 2
 
@@ -184,9 +187,8 @@ def back_step_hs(sv_array: xr.DataArray, depths_indices: xr.DataArray, min_depth
     back_step_indices = xr.apply_ufunc(_back_step_inner_hs,
                                        sv_array,
                                        depths_indices,
-                                       sv_array[:, depths_indices],
                                        input_core_dims=[['range'],
-                                                        [], []],
+                                                        []],
                                        kwargs={'heaviside': heaviside,
                                                'min_depth_value_fraction': min_depth_value_fraction,
                                                'abs_threshold': abs_backstep_threshold,

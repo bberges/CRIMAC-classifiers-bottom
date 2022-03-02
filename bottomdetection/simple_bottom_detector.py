@@ -32,10 +32,11 @@ def detect_bottom(zarr_data: xr.Dataset, parameters: Parameters = Parameters()) 
     return bottom_depths
 
 
-def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, vi, min_depth_value_fraction: float,
+def _back_step_inner(v, v_prev, v_next, shift, shift_prev, shift_next, di, min_depth_value_fraction: float,
                      segment_nsamples):
     if di < 0:
         return -1
+    vi = v[di]
     vs = bottom_utils.stack_max(v, v_prev, v_next, shift, shift_prev, shift_next)
     back_step_offset = 1
     segment_end = di
@@ -82,9 +83,8 @@ def back_step(sv_array: xr.DataArray, depths_indices: xr.DataArray, depth_correc
                                        range_shift.shift(ping_time=1),
                                        range_shift.shift(ping_time=-1),
                                        depths_indices,
-                                       sv_array[:, depths_indices],
                                        input_core_dims=[['range'], ['range'], ['range'],
-                                                        [], [], [], [], []],
+                                                        [], [], [], []],
                                        kwargs={'min_depth_value_fraction': min_depth_value_fraction,
                                                'segment_nsamples': segment_nsamples},
                                        vectorize=True,

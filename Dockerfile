@@ -1,4 +1,4 @@
-FROM python:3 as builder
+FROM python:3.8 as builder
 
 RUN mkdir /install
 WORKDIR /install
@@ -12,7 +12,7 @@ RUN apt-get update -y && \
     (test ! -f /ca.cer || pip config set global.cert /ca.cer) && \
     pip install --prefix=/install -r /requirements.txt
 
-FROM python:3-slim
+FROM python:3.8-slim
 
 ARG version_number
 ARG commit_sha

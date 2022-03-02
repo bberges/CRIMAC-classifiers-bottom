@@ -157,7 +157,7 @@ def detect_from_angles(angles_alongship, angles_athwartship, ranges):
     sample_dist = float(angles_alongship.range[1] - angles_alongship.range[0])
 
     max_candidates = 3
-    indices = xr.apply_ufunc(_detect_from_angles_inner,
+    angles_indices = xr.apply_ufunc(_detect_from_angles_inner,
                              angles_alongship,
                              angles_athwartship,
                              ranges,
@@ -174,15 +174,18 @@ def detect_from_angles(angles_alongship, angles_athwartship, ranges):
                              output_dtypes=[np.float32]
                              )
 
-    bottom_depths = angles_alongship.range[indices[:, :max_candidates].astype(np.int64)].where(indices[:, :max_candidates] >= 0, np.nan)
+    indices = angles_indices[:, :max_candidates]
+    qualities = angles_indices[:, max_candidates:max_candidates * 2]
+    r_squared = angles_indices[:, max_candidates * 2]
+    bottom_depths = angles_alongship.range[indices.astype(np.int64)].where(indices >= 0, np.nan)
 
     return xr.DataArray(name='bottom_depth_angles', data=bottom_depths, dims=['ping_time', 'candidates'],
                         coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='bottom_index_angles', data=indices[:, :max_candidates].astype(np.int64), dims=['ping_time', 'candidates'],
+           xr.DataArray(name='bottom_index_angles', data=indices.astype(np.int64), dims=['ping_time', 'candidates'],
                         coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='quality', data=indices[:, max_candidates:max_candidates*2], dims=['ping_time', 'candidates'],
+           xr.DataArray(name='quality', data=qualities, dims=['ping_time', 'candidates'],
                         coords={'ping_time': angles_alongship.ping_time, 'candidates': range(max_candidates)}), \
-           xr.DataArray(name='r_squared_mean', data=indices[:, max_candidates * 2], dims=['ping_time'],
+           xr.DataArray(name='r_squared_mean', data=r_squared, dims=['ping_time'],
                         coords={'ping_time': angles_alongship.ping_time})
 
 

@@ -5,6 +5,8 @@ This repository contains code for bottom detection in the CRIMAC project.
 The bottom detection works on zarr files created by
 [CRIMAC-preprocessing](https://github.com/CRIMAC-WP4-Machine-learning/CRIMAC-preprocessing).
 
+https://hub.docker.com/r/crimac/bottomdetection
+
 ## Running using Docker
 
 Mounted directories:
